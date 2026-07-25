@@ -27,7 +27,21 @@
   .op-taskadv:hover { background:#f4f2ff !important; }
   .op-nav:hover { background:#f2effc; }
 
-  @media (max-width: 900px){ .op-shell { grid-template-columns:1fr !important; } .op-side { display:none !important; } .op-grid4 { grid-template-columns:repeat(2,1fr) !important; } .op-two { grid-template-columns:1fr !important; } .op-kanban { grid-template-columns:1fr !important; } }
+  /* --- Seguimiento module --- */
+  .seg-ev { cursor:grab; }
+  .seg-ev:active { cursor:grabbing; }
+  .seg-ev.dragging { opacity:.35; }
+  .seg-day.drop-hot { background:#f0ebff !important; outline:2px dashed #b9a7fb; outline-offset:-2px; }
+  .seg-conv:hover { background:#faf9ff !important; }
+  .seg-day:hover { background:#faf9ff; }
+  .seg-in:focus { border-color:#7a5af8 !important; box-shadow:0 0 0 3px rgba(122,90,248,0.13); }
+  .seg-primary:hover { background:#6a48e8 !important; }
+  .seg-ghost:hover { background:#f4f2ff !important; border-color:#d9d3f3 !important; }
+  .seg-drawer { transition:transform .28s cubic-bezier(.4,0,.2,1); }
+  .seg-scroll::-webkit-scrollbar { width:9px; height:9px; }
+  .seg-scroll::-webkit-scrollbar-thumb { background:#e3ddf2; border-radius:99px; }
+
+  @media (max-width: 900px){ .op-shell { grid-template-columns:1fr !important; } .op-side { display:none !important; } .op-grid4 { grid-template-columns:repeat(2,1fr) !important; } .op-two { grid-template-columns:1fr !important; } .op-kanban { grid-template-columns:1fr !important; } .seg-grid { grid-template-columns:1fr !important; } .seg-drawer { width:100vw !important; } }
   @media (max-width: 560px){ .op-grid4 { grid-template-columns:1fr !important; } }
 </style>
 </head>
@@ -132,14 +146,14 @@
     var views = [
       { id: "dash", label: "Resumen", icon: "◫", count: "" },
       { id: "clients", label: "Clientes", icon: "◍", count: s.clients.length },
-      { id: "follow", label: "Follow-ups", icon: "✉", count: pendientes },
+      { id: "seg", label: "Seguimiento", icon: "✉", count: "" },
       { id: "tasks", label: "Tareas", icon: "✓", count: abiertas }
     ];
 
     var heads = {
       dash: ["Resumen", "Estado general de las campañas · julio 2026"],
       clients: ["Clientes", s.clients.length + " cuentas activas en la plataforma"],
-      follow: ["Follow-ups", pendientes + " secuencias esperando acción"],
+      seg: ["Seguimiento", "Conversaciones y follow-ups en tu calendario"],
       tasks: ["Tareas", abiertas + " tareas abiertas en el equipo"]
     };
 
@@ -156,7 +170,7 @@
       toast: s.toast,
       isDash: s.view === "dash",
       isClients: s.view === "clients",
-      isFollow: s.view === "follow",
+      isSeg: s.view === "seg",
       isTasks: s.view === "tasks",
 
       nav: views.map(function (v) {
@@ -343,7 +357,7 @@
   function content(v) {
     if (v.isDash) return dashView(v);
     if (v.isClients) return clientsView(v);
-    if (v.isFollow) return followView(v);
+    if (v.isSeg) return '<div id="op-seg-mount"></div>';
     if (v.isTasks) return tasksView(v);
     return "";
   }
@@ -367,7 +381,7 @@
       + '<div style="min-width:0;">'
       + '<h1 id="op-title" style="margin:0; font-size:22px; font-weight:400; letter-spacing:-0.02em;"></h1>'
       + '<p id="op-subtitle" style="margin:3px 0 0; font-size:13.5px; font-weight:300; color:#8b8699;"></p></div>'
-      + '<div style="margin-left:auto; display:flex; align-items:center; gap:12px;">'
+      + '<div id="op-headtools" style="margin-left:auto; display:flex; align-items:center; gap:12px;">'
       + '<div style="position:relative; display:flex; align-items:center;">'
       + '<span style="position:absolute; left:13px; font-size:13px; color:#a8a3b8;">⌕</span>'
       + '<input id="op-search" class="op-search" placeholder="Buscar…" style="width:220px; padding:10px 14px 10px 30px; border:1px solid #e7e2f5; border-radius:11px; background:#fff; font-size:14px; font-weight:300; color:#141319; outline:none;"></div>'
@@ -428,10 +442,366 @@
     var search = document.getElementById("op-search");
     if (search.value !== state.query) search.value = state.query;
     document.getElementById("op-content").innerHTML = content(v);
+    var tools = document.getElementById("op-headtools");
+    if (tools) tools.style.display = v.isSeg ? "none" : "flex";
+    if (v.isSeg) { if (window.OPSEG) OPSEG.mount(document.getElementById("op-seg-mount")); }
+    else { if (window.OPSEG) OPSEG.hide(); }
     renderToast();
   }
 
   render();
+})();
+</script>
+
+<!-- ============ SEGUIMIENTO (módulo integrado) ============ -->
+<script>
+"use strict";
+window.OPSEG = (function () {
+  var _id=5000; function uid(p){ _id++; return (p||"id")+"_"+_id; }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  function pad2(n){ return String(n).padStart(2,"0"); }
+  var DAY=86400000,HOUR=3600000,MIN=60000;
+  var MES=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  var MESL=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  function fmt(ms){ var d=new Date(ms); return d.getDate()+" "+MES[d.getMonth()]+" · "+pad2(d.getHours())+":"+pad2(d.getMinutes()); }
+  function hhmm(ms){ var d=new Date(ms); return pad2(d.getHours())+":"+pad2(d.getMinutes()); }
+  function rel(ms){ var d=ms-Date.now(),a=Math.abs(d),s; if(a<MIN)return"ahora"; if(a<HOUR)s=Math.round(a/MIN)+" min"; else if(a<DAY)s=Math.round(a/HOUR)+" h"; else s=Math.round(a/DAY)+" d"; return d<0?"hace "+s:"en "+s; }
+  function firstName(n){ return String(n||"").split(" ")[0]; }
+  function initials(n){ return String(n||"?").split(" ").map(function(w){return w[0];}).join("").slice(0,2).toUpperCase(); }
+  function dayStart(ms){ var d=new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
+  function sameDay(a,b){ return dayStart(a)===dayStart(b); }
+  function toLocalInput(ms){ var d=new Date(ms); return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+"T"+pad2(d.getHours())+":"+pad2(d.getMinutes()); }
+  function stripHtml(h){ return String(h).replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); }
+  function textToHtml(t){ return t.indexOf("<p")!==-1 ? t : "<p>"+esc(t).replace(/\n{2,}/g,"</p><p>").replace(/\n/g,"<br>")+"</p>"; }
+  function htmlToText(h){ return String(h).replace(/<\/p>\s*<p>/g,"\n\n").replace(/<br\s*\/?>/g,"\n").replace(/<[^>]+>/g,"").trim(); }
+  function prettyName(email){ var lp=String(email).split("@")[0].replace(/[._-]+/g," "); return lp.replace(/\b\w/g,function(c){return c.toUpperCase();}); }
+  var ME_NAME="Xavi", now=Date.now();
+
+  function m(dir,text,off){ return { id:uid("m"), direction:dir, body_html:textToHtml(text), body_text:text, date:now+off, message_id:uid("mid") }; }
+  var DIRECTORY=[
+    { email:"laura.mendez@finora.es", name:"Laura Méndez", company:"Finora", msgs:[
+      m("outbound","Hola Laura, vi que Finora está escalando el equipo de ventas. Ayudamos a fintechs a agendar reuniones con cold email sin quemar el dominio. ¿Te viene bien una llamada corta?",-9*DAY),
+      m("inbound","Hola Xavi, justo estamos con ese reto. ¿Qué reply rate soléis manejar en fintech?",-8*DAY),
+      m("outbound","En fintech solemos movernos en 18-25% con un ICP afinado. Te paso un caso muy parecido al vuestro por email.",-8*DAY+2*HOUR),
+      m("inbound","Perfecto, lo miro con el equipo y te digo. Gracias.",-2*DAY)
+    ]},
+    { email:"carlos@brightpack.io", name:"Carlos Ibáñez", company:"BrightPack", msgs:[
+      m("outbound","Carlos, os propongo montar una secuencia de 4 pasos para BrightPack este mes. ¿Lo vemos?",-6*DAY),
+      m("inbound","Suena bien. Mándame propuesta y lo comento internamente.",-5*DAY)
+    ]},
+    { email:"sofia.romero@medialab.tv", name:"Sofía Romero", company:"MediaLab", msgs:[
+      m("outbound","Sofía, te dejé 3 casos de audiovisual con nuestro método. ¿Los pudiste ver?",-4*DAY),
+      m("inbound","Sí Xavi, nos encajan. La semana que viene lo cerramos que ahora estoy liada.",-3*HOUR)
+    ]},
+    { email:"dpuente@northlogic.com", name:"Diego Puente", company:"NorthLogic", msgs:[
+      m("outbound","Diego, ¿seguimos adelante con la ampliación de buzones para Q3?",-14*DAY)
+    ]},
+    { email:"ana@velvetcare.health", name:"Ana Torres", company:"VelvetCare", msgs:[
+      m("outbound","Ana, encantado de retomar. ¿Te encaja una demo esta semana?",-2*DAY),
+      m("inbound","Hola Xavi, pásame la propuesta y las condiciones para pasarlo a compras, porfa.",-90*MIN)
+    ]}
+  ];
+
+  var state={
+    account:null, connectEmail:"",
+    threads:[], openThread:null,
+    importOpen:false, importQuery:"",
+    calMonth:(function(){ var d=new Date(); return {y:d.getFullYear(),m:d.getMonth()}; })(),
+    draftReply:"", replyTone:"normal",
+    draftFollow:"", schedInput:"",
+    toast:""
+  };
+  var drag={fu:null};
+  var mountEl=null, active=false, listeners=false, containers=false;
+
+  function threadById(id){ return state.threads.filter(function(t){return t.id===id;})[0]; }
+  function lastMsg(t){ return t.messages.length?t.messages[t.messages.length-1]:null; }
+  function allFollowups(){ var o=[]; state.threads.forEach(function(t){ t.followups.forEach(function(f){ o.push({f:f,t:t}); }); }); return o; }
+  function activeFus(){ return allFollowups().filter(function(o){ return o.f.status==="scheduled"; }); }
+
+  function importConversation(email){
+    email=String(email).trim().toLowerCase();
+    if(!email){ flash("Escribe el email de la persona"); return; }
+    var exists=state.threads.filter(function(t){return t.email.toLowerCase()===email;})[0];
+    if(exists){ state.openThread=exists.id; state.importOpen=false; render(); flash("Conversación ya importada"); return; }
+    var d=DIRECTORY.filter(function(x){return x.email.toLowerCase()===email;})[0];
+    var name,company,msgs;
+    if(d){ name=d.name; company=d.company; msgs=d.msgs.map(function(x){return Object.assign({},x);}); }
+    else { name=prettyName(email); company=(email.split("@")[1]||"").split(".")[0].replace(/\b\w/,function(c){return c.toUpperCase();}); msgs=[ m("outbound","Hola "+firstName(name)+", te escribo para retomar nuestra conversación. ¿Lo comentamos?",-3*DAY) ]; }
+    var t={ id:uid("t"), email:email, contact_name:name, company:company, subject:"Conversación con "+name, status:"active", messages:msgs, followups:[] };
+    state.threads.push(t);
+    state.openThread=t.id; state.importOpen=false; state.importQuery="";
+    render(); flash("Importada la conversación con "+name+" ("+msgs.length+" mensajes)");
+  }
+  function sendReply(){
+    var t=threadById(state.openThread); if(!t) return;
+    var body=state.draftReply.trim(); if(!body){ flash("Escribe o genera una respuesta"); return; }
+    var html=textToHtml(body);
+    t.messages.push({ id:uid("m"), direction:"outbound", body_html:html, body_text:stripHtml(html), date:Date.now(), message_id:uid("mid") });
+    state.draftReply=""; render(); flash("Respuesta enviada a "+firstName(t.contact_name));
+  }
+  function scheduleFollow(){
+    var t=threadById(state.openThread); if(!t) return;
+    var body=state.draftFollow.trim(); if(!body){ flash("Escribe el cuerpo del follow-up"); return; }
+    var at=state.schedInput?Date.parse(state.schedInput):0; if(!at||isNaN(at)){ flash("Elige fecha y hora"); return; }
+    t.followups.push({ id:uid("f"), body_html:textToHtml(body), scheduled_at:at, status:"scheduled", origin:"manual" });
+    state.draftFollow="";
+    var d=new Date(at); state.calMonth={y:d.getFullYear(),m:d.getMonth()};
+    render(); flash("Follow-up programado · "+fmt(at)+" (míralo en el calendario)");
+  }
+  function sendFollowNow(fid){
+    allFollowups().forEach(function(o){ if(o.f.id===fid && o.f.status==="scheduled"){ var t=o.t,f=o.f; f.status="sent"; f.sent_at=Date.now(); t.messages.push({ id:uid("m"), direction:"outbound", body_html:f.body_html, body_text:stripHtml(f.body_html), date:Date.now(), message_id:uid("mid"), _followup:true }); }});
+    render(); flash("Follow-up enviado ahora");
+  }
+  function cancelFollow(fid){ allFollowups().forEach(function(o){ if(o.f.id===fid && o.f.status==="scheduled"){ o.f.status="cancelled"; } }); render(); flash("Follow-up cancelado"); }
+  function rescheduleFollow(fid,newDayMs){
+    var moved=null;
+    allFollowups().forEach(function(o){ if(o.f.id===fid){ var d=new Date(o.f.scheduled_at); var nd=new Date(newDayMs); nd.setHours(d.getHours(),d.getMinutes(),0,0); o.f.scheduled_at=nd.getTime(); moved={f:o.f,t:o.t}; }});
+    render(); if(moved) flash("«"+firstName(moved.t.contact_name)+"» movido a "+fmt(moved.f.scheduled_at));
+  }
+  function generateReply(t,tone){
+    var fn=firstName(t.contact_name)||"hola", lm=lastMsg(t);
+    var inbound=lm&&lm.direction==="inbound"?(lm.body_text||"").toLowerCase():"";
+    var contract=/contrato|propuesta|presupuesto|factura|condiciones|compras/.test(inbound);
+    var asks=inbound.indexOf("?")!==-1||/caso|reply rate|precio|cómo/.test(inbound);
+    var mid=contract?"Te preparo hoy mismo la propuesta con las condiciones y te la paso para compras.":asks?"Te respondo a lo concreto: te paso los casos y los números reales, sin humo.":"Creo que encaja con lo que buscáis y me encantaría enseñártelo en concreto.";
+    var open,cta;
+    if(tone==="directo"){ open="Hola "+fn+","; cta="¿Llamada de 15 min esta semana? Dime hueco y lo bloqueo."; }
+    else if(tone==="cercano"){ open="¡Hola "+fn+"!"; cta="Si te apetece lo vemos en una llamada corta y relajada, cuando mejor te venga."; }
+    else { open="Hola "+fn+","; cta="¿Te viene bien una llamada de 15 min esta semana para verlo en detalle?"; }
+    return "<p>"+esc(open)+"</p><p>"+esc(mid)+"</p><p>"+esc(cta)+"</p><p>Un saludo,<br>Xavi</p>";
+  }
+
+  function flash(msg){ state.toast=msg; renderToast(); clearTimeout(flash._t); flash._t=setTimeout(function(){ state.toast=""; renderToast(); },2600); }
+
+  function doConnect(provider){
+    var email=(state.connectEmail||"").trim();
+    if(!email || email.indexOf("@")===-1){ flash("Escribe un email válido"); return; }
+    state.account={ email:email, provider:provider||"IMAP" };
+    seedInbox(); render(); flash("Cuenta conectada · "+email);
+  }
+  function seedInbox(){
+    ["laura.mendez@finora.es","carlos@brightpack.io"].forEach(function(e){
+      var d=DIRECTORY.filter(function(x){return x.email===e;})[0];
+      state.threads.push({ id:uid("t"), email:d.email, contact_name:d.name, company:d.company, subject:"Conversación con "+d.name, status:"active", messages:d.msgs.map(function(x){return Object.assign({},x);}), followups:[] });
+    });
+    var la=state.threads[0], ca=state.threads[1];
+    function at(days,h){ var d=new Date(); d.setDate(d.getDate()+days); d.setHours(h,0,0,0); return d.getTime(); }
+    la.followups.push({ id:uid("f"), body_html:textToHtml("Hola Laura, ¿pudisteis revisar el caso que te pasé? Quedo atento."), scheduled_at:at(1,9), status:"scheduled", origin:"manual" });
+    la.followups.push({ id:uid("f"), body_html:textToHtml("Laura, te dejo también los números de otro cliente fintech."), scheduled_at:at(4,11), status:"scheduled", origin:"ai_assisted" });
+    ca.followups.push({ id:uid("f"), body_html:textToHtml("Carlos, ¿le pudiste dar una vuelta a la propuesta?"), scheduled_at:at(2,10), status:"scheduled", origin:"manual" });
+    ca.followups.push({ id:uid("f"), body_html:textToHtml("Con equipos como el tuyo solemos ver +30% de reuniones en 6 semanas."), scheduled_at:at(6,12), status:"scheduled", origin:"manual" });
+  }
+
+  function shiftMonth(delta){ var mm=state.calMonth.m+delta,yy=state.calMonth.y; while(mm<0){mm+=12;yy--;} while(mm>11){mm-=12;yy++;} return {y:yy,m:mm}; }
+  function defaultSched(){ var d=new Date(); d.setDate(d.getDate()+1); d.setHours(9,0,0,0); return toLocalInput(d.getTime()); }
+
+  // ---------- listeners ----------
+  function ensureContainers(){
+    if(containers) return;
+    ["opseg-drawer","opseg-modal","opseg-toast"].forEach(function(id){ if(!document.getElementById(id)){ var d=document.createElement("div"); d.id=id; document.body.appendChild(d); } });
+    containers=true;
+  }
+  function attach(){
+    if(listeners) return;
+    document.addEventListener("click", onClick);
+    document.addEventListener("input", onInput);
+    document.addEventListener("change", onInput);
+    document.addEventListener("dragstart", function(e){ if(!active) return; var ev=e.target.closest(".seg-ev"); if(!ev) return; drag.fu=ev.getAttribute("data-fu"); ev.classList.add("dragging"); try{ e.dataTransfer.setData("text/plain",drag.fu); e.dataTransfer.effectAllowed="move"; }catch(_){} });
+    document.addEventListener("dragend", function(e){ var ev=e.target.closest(".seg-ev"); if(ev) ev.classList.remove("dragging"); document.querySelectorAll(".drop-hot").forEach(function(x){x.classList.remove("drop-hot");}); drag.fu=null; });
+    document.addEventListener("dragover", function(e){ if(!active||!drag.fu) return; var cell=e.target.closest(".seg-day"); if(cell){ e.preventDefault(); e.dataTransfer.dropEffect="move"; cell.classList.add("drop-hot"); } });
+    document.addEventListener("dragleave", function(e){ var cell=e.target.closest(".seg-day"); if(cell) cell.classList.remove("drop-hot"); });
+    document.addEventListener("drop", function(e){ if(!active||!drag.fu) return; var cell=e.target.closest(".seg-day"); if(cell){ e.preventDefault(); cell.classList.remove("drop-hot"); rescheduleFollow(drag.fu, parseInt(cell.getAttribute("data-day"),10)); drag.fu=null; } });
+    listeners=true;
+  }
+  function onInput(e){ if(!active) return; var el=e.target.closest("[data-sm]"); if(!el) return; var mo=el.getAttribute("data-sm"); state[mo]=el.value; if(mo==="importQuery"){ var s=document.getElementById("opseg-import-sugg"); if(s) s.innerHTML=importSuggestions(); } }
+  function onClick(e){
+    if(!active) return;
+    var b=e.target.closest("[data-sa]"); if(!b) return;
+    var a=b.getAttribute("data-sa");
+    switch(a){
+      case "prov": doConnect(b.getAttribute("data-p")); break;
+      case "connect": doConnect("IMAP"); break;
+      case "import-open": state.importOpen=true; state.importQuery=""; render(); setTimeout(function(){ var i=document.getElementById("opseg-import-input"); if(i) i.focus(); },30); break;
+      case "import-close": if(e.target===b){ state.importOpen=false; render(); } break;
+      case "import-do": importConversation(b.getAttribute("data-email")||state.importQuery); break;
+      case "open": state.openThread=b.getAttribute("data-id"); state.draftReply=""; state.draftFollow=""; state.schedInput=defaultSched(); render(); break;
+      case "drawer-close": state.openThread=null; render(); break;
+      case "prev-month": state.calMonth=shiftMonth(-1); render(); break;
+      case "next-month": state.calMonth=shiftMonth(1); render(); break;
+      case "today-month": var d=new Date(); state.calMonth={y:d.getFullYear(),m:d.getMonth()}; render(); break;
+      case "tone": state.replyTone=b.getAttribute("data-t"); renderDrawer(); break;
+      case "gen-reply": { var t=threadById(state.openThread); state.draftReply=htmlToText(generateReply(t,state.replyTone)); renderDrawer(); flash("IA · borrador generado ("+state.replyTone+")"); break; }
+      case "send-reply": sendReply(); break;
+      case "gen-follow": { var t2=threadById(state.openThread); state.draftFollow=htmlToText(generateReply(t2,"normal")); renderDrawer(); flash("IA · borrador de follow-up generado"); break; }
+      case "sched-follow": scheduleFollow(); break;
+      case "send-now": sendFollowNow(b.getAttribute("data-id")); break;
+      case "cancel-follow": cancelFollow(b.getAttribute("data-id")); break;
+      case "open-fu": { var fid=b.getAttribute("data-id"); var o=allFollowups().filter(function(x){return x.f.id===fid;})[0]; if(o){ state.openThread=o.t.id; state.draftReply=""; state.draftFollow=""; state.schedInput=defaultSched(); render(); } break; }
+    }
+  }
+
+  // ---------- inline render ----------
+  function connectCard(){
+    return '<div style="display:flex;justify-content:center;padding:34px 10px;">'
+      + '<div style="width:100%;max-width:440px;background:#fff;border:1px solid #edeaf7;border-radius:20px;padding:30px 28px;box-shadow:0 16px 40px rgba(122,90,248,0.08);">'
+      + '<h2 style="margin:0 0 6px;font-size:20px;font-weight:400;letter-spacing:-0.02em;">Conecta tu correo</h2>'
+      + '<p style="margin:0 0 20px;font-size:13.5px;font-weight:300;color:#8b8699;line-height:1.5;">Sincroniza tu buzón para importar conversaciones y programar follow-ups en el calendario.</p>'
+      + '<label style="display:block;font-size:12.5px;font-weight:500;color:#57565f;margin-bottom:7px;">Tu email</label>'
+      + '<input id="opseg-connect" class="seg-in" data-sm="connectEmail" value="'+esc(state.connectEmail)+'" placeholder="tu@empresa.com" style="width:100%;padding:12px 14px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;font-weight:300;outline:none;margin-bottom:15px;">'
+      + '<div style="display:flex;gap:10px;margin-bottom:15px;">'
+      + '<button class="seg-ghost" data-sa="prov" data-p="Gmail" style="flex:1;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:11px;padding:11px;font-size:13px;cursor:pointer;">Gmail / Google</button>'
+      + '<button class="seg-ghost" data-sa="prov" data-p="IMAP" style="flex:1;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:11px;padding:11px;font-size:13px;cursor:pointer;">IMAP / SMTP</button></div>'
+      + '<button class="seg-primary" data-sa="connect" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:12px;padding:13px;font-size:14.5px;cursor:pointer;box-shadow:0 12px 26px rgba(122,90,248,0.3);">Conectar cuenta</button>'
+      + '<p style="margin:14px 0 0;font-size:11.5px;font-weight:300;color:#a8a3b8;text-align:center;">Prototipo · no se envían credenciales a ningún servidor.</p>'
+      + '</div></div>';
+  }
+  function convPanel(){
+    var convs=state.threads.map(function(t){
+      var open=state.openThread===t.id, lm=lastMsg(t), pend=t.followups.filter(function(f){return f.status==="scheduled";}).length;
+      return '<button class="seg-conv" data-sa="open" data-id="'+t.id+'" style="text-align:left;width:100%;border:none;background:'+(open?"#f4f2ff":"transparent")+';border-radius:10px;padding:9px 10px;cursor:pointer;display:flex;gap:10px;align-items:center;">'
+        + '<span style="width:30px;height:30px;flex:none;border-radius:8px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;">'+esc(initials(t.contact_name))+'</span>'
+        + '<span style="min-width:0;flex:1;line-height:1.3;"><span style="display:block;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.contact_name)+'</span>'
+        + '<span style="display:block;font-size:11.5px;font-weight:300;color:#8b8699;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.company)+(lm?" · "+rel(lm.date):"")+'</span></span>'
+        + (pend?'<span style="font-size:11px;color:#5b3ad9;background:#f2effc;padding:2px 7px;border-radius:99px;flex:none;">'+pend+'</span>':'')+'</button>';
+    }).join("");
+    return '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 8px 22px rgba(122,90,248,0.05);overflow:hidden;">'
+      + '<div style="padding:15px 16px 12px;border-bottom:1px solid #f1eefa;"><button class="seg-primary" data-sa="import-open" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:11px;padding:11px;font-size:13px;cursor:pointer;box-shadow:0 8px 20px rgba(122,90,248,0.26);">⌕ Importar conversación</button></div>'
+      + '<div class="seg-scroll" style="max-height:520px;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:2px;">'
+      + (convs||'<div style="padding:14px 10px;font-size:12.5px;font-weight:300;color:#a8a3b8;">Aún no has importado ninguna conversación.</div>')+'</div></div>';
+  }
+  function evChip(o){
+    var t=o.t,f=o.f,ai=f.origin&&f.origin.indexOf("ai")===0;
+    return '<div class="seg-ev" draggable="true" data-fu="'+f.id+'" data-sa="open-fu" data-id="'+f.id+'" title="'+esc(stripHtml(f.body_html))+'" '
+      + 'style="display:flex;align-items:center;gap:6px;background:#f2effc;border:1px solid #e3ddf7;border-left:3px solid #7a5af8;border-radius:8px;padding:4px 7px;margin-bottom:4px;overflow:hidden;">'
+      + '<span style="font-size:10.5px;font-weight:600;color:#5b3ad9;flex:none;">'+hhmm(f.scheduled_at)+'</span>'
+      + (ai?'<span style="font-size:9px;color:#7a5af8;flex:none;">✦</span>':'')
+      + '<span style="font-size:11.5px;font-weight:400;color:#3a3942;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(firstName(t.contact_name))+' · '+esc(t.company)+'</span></div>';
+  }
+  function calendar(){
+    var y=state.calMonth.y,mo=state.calMonth.m;
+    var first=new Date(y,mo,1), startOffset=(first.getDay()+6)%7;
+    var gridStart=dayStart(new Date(y,mo,1-startOffset).getTime());
+    var todayS=dayStart(Date.now());
+    var wdays=["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+    var head=wdays.map(function(w){ return '<div style="padding:8px 10px;font-size:11.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:#a8a3b8;">'+w+'</div>'; }).join("");
+    var evs=activeFus(), cells="";
+    for(var i=0;i<42;i++){
+      var cd=gridStart+i*DAY, inMonth=new Date(cd).getMonth()===mo, isToday=cd===todayS, past=cd<todayS;
+      var dayEvs=evs.filter(function(o){ return sameDay(o.f.scheduled_at,cd); }).sort(function(a,b){return a.f.scheduled_at-b.f.scheduled_at;});
+      cells += '<div class="seg-day" data-day="'+cd+'" style="min-height:98px;border-right:1px solid #f1eefa;border-bottom:1px solid #f1eefa;padding:7px;background:'+(inMonth?(past?"#fcfbfe":"#fff"):"#faf9fd")+';display:flex;flex-direction:column;">'
+        + '<div style="margin-bottom:6px;"><span style="font-size:12.5px;font-weight:'+(isToday?"600":"400")+';'+(isToday?'width:24px;height:24px;border-radius:50%;background:#7a5af8;color:#fff;display:inline-flex;align-items:center;justify-content:center;':'color:'+(inMonth?"#57565f":"#c3bed0")+';')+'">'+new Date(cd).getDate()+'</span></div>'
+        + '<div style="flex:1;min-height:0;">'+dayEvs.map(evChip).join("")+'</div></div>';
+    }
+    return '<div style="border:1px solid #edeaf7;border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 10px 30px rgba(122,90,248,0.05);">'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #f1eefa;background:#fbfaff;">'+head+'</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);">'+cells+'</div></div>';
+  }
+  function renderInline(){
+    if(!mountEl) return;
+    if(!state.account){ mountEl.innerHTML=connectCard(); return; }
+    var toolbar='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<button class="seg-ghost" data-sa="prev-month" style="width:34px;height:34px;border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#57565f;cursor:pointer;font-size:15px;">‹</button>'
+      + '<button class="seg-ghost" data-sa="next-month" style="width:34px;height:34px;border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#57565f;cursor:pointer;font-size:15px;">›</button>'
+      + '<span style="font-size:19px;font-weight:400;letter-spacing:-0.02em;margin:0 4px;">'+MESL[state.calMonth.m]+' <span style="color:#a8a3b8;">'+state.calMonth.y+'</span></span>'
+      + '<button class="seg-ghost" data-sa="today-month" style="border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#5b3ad9;cursor:pointer;font-size:12.5px;padding:8px 13px;">Hoy</button></div>'
+      + '<div style="margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
+      + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:2px;background:#7a5af8;"></span>'+activeFus().length+' follow-ups programados</span>'
+      + '<span style="font-size:12.5px;font-weight:300;color:#12784a;display:inline-flex;align-items:center;gap:6px;background:#e4f7ed;padding:6px 11px;border-radius:99px;">✓ '+esc(state.account.email)+'</span>'
+      + '</div></div>'
+      + '<div style="font-size:12.5px;font-weight:300;color:#8b8699;margin-bottom:12px;">Arrastra un follow-up a otro día para reprogramarlo · pulsa para abrir la conversación.</div>';
+    mountEl.innerHTML=toolbar+'<div class="seg-grid" style="display:grid;grid-template-columns:264px 1fr;gap:18px;align-items:start;">'+convPanel()+calendar()+'</div>';
+  }
+
+  // ---------- overlays ----------
+  function renderDrawer(){
+    var host=document.getElementById("opseg-drawer"); if(!host) return;
+    var t=threadById(state.openThread);
+    if(!active||!t){ host.innerHTML=""; return; }
+    var transcript=t.messages.map(function(mm){
+      var out=mm.direction==="outbound";
+      return '<div style="display:flex;'+(out?"justify-content:flex-end;":"")+'"><div style="max-width:82%;background:'+(out?"#f2effc":"#fff")+';border:1px solid '+(out?"#e3ddf7":"#edeaf7")+';border-radius:'+(out?"13px 13px 4px 13px":"13px 13px 13px 4px")+';padding:11px 13px;">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;"><span style="font-size:11.5px;font-weight:500;color:'+(out?"#5b3ad9":"#141319")+';">'+(out?ME_NAME:esc(firstName(t.contact_name)))+'</span>'
+        + (mm._followup?'<span style="font-size:9.5px;color:#5b3ad9;background:#ece7ff;padding:1px 6px;border-radius:99px;">follow-up</span>':'')
+        + '<span style="margin-left:auto;font-size:10.5px;color:#a8a3b8;">'+fmt(mm.date)+'</span></div>'
+        + '<div style="font-size:13px;font-weight:300;color:#3a3942;line-height:1.55;">'+(mm.body_html||("<p>"+esc(mm.body_text)+"</p>"))+'</div></div></div>';
+    }).join('<div style="height:10px;"></div>');
+    var fus=t.followups.filter(function(f){return f.status==="scheduled";}).sort(function(a,b){return a.scheduled_at-b.scheduled_at;});
+    var fuList=fus.length?'<div style="display:flex;flex-direction:column;gap:7px;">'+fus.map(function(f){
+      return '<div style="display:flex;align-items:center;gap:9px;border:1px solid #f1eefa;border-radius:10px;padding:8px 10px;background:#fcfbff;">'
+        + '<span style="width:8px;height:8px;border-radius:2px;background:#7a5af8;flex:none;"></span>'
+        + '<span style="min-width:0;flex:1;font-size:12px;font-weight:300;color:#57565f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(stripHtml(f.body_html))+'</span>'
+        + '<span style="font-size:11.5px;color:#5b3ad9;white-space:nowrap;">'+fmt(f.scheduled_at)+'</span>'
+        + '<button class="seg-ghost" data-sa="send-now" data-id="'+f.id+'" title="Enviar ahora" style="border:1px solid #e7e2f5;background:#fff;color:#12784a;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;">▶</button>'
+        + '<button class="seg-ghost" data-sa="cancel-follow" data-id="'+f.id+'" title="Cancelar" style="border:1px solid #e7e2f5;background:#fff;color:#b0234c;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;">✕</button></div>';
+    }).join("")+'</div>':'<div style="font-size:12px;font-weight:300;color:#a8a3b8;">Sin follow-ups. Programa uno abajo y aparecerá en el calendario.</div>';
+    var toneChips=[["normal","Normal"],["directo","Directo"],["cercano","Cercano"]].map(function(x){ var on=state.replyTone===x[0];
+      return '<button class="seg-ghost" data-sa="tone" data-t="'+x[0]+'" style="border:1px solid '+(on?"#7a5af8":"#e7e2f5")+';background:'+(on?"#f4f2ff":"#fff")+';color:'+(on?"#5b3ad9":"#57565f")+';border-radius:99px;padding:5px 11px;font-size:11.5px;cursor:pointer;">'+x[1]+'</button>'; }).join("");
+    host.innerHTML=
+      '<div data-sa="drawer-close" style="position:fixed;inset:0;z-index:90;background:rgba(20,19,25,0.28);"></div>'
+      + '<div class="seg-drawer seg-scroll" style="position:fixed;top:0;right:0;height:100vh;width:460px;z-index:100;background:#faf9fe;box-shadow:-20px 0 50px rgba(20,19,25,0.14);display:flex;flex-direction:column;overflow:auto;">'
+      + '<div style="flex:none;background:#fff;border-bottom:1px solid #edeaf7;padding:15px 18px;display:flex;align-items:center;gap:12px;">'
+      + '<span style="width:40px;height:40px;flex:none;border-radius:11px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;">'+esc(initials(t.contact_name))+'</span>'
+      + '<div style="min-width:0;flex:1;"><div style="font-size:15px;font-weight:500;">'+esc(t.contact_name)+'</div><div style="font-size:12px;font-weight:300;color:#8b8699;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.company)+' · '+esc(t.email)+'</div></div>'
+      + '<button class="seg-ghost" data-sa="drawer-close" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;width:32px;height:32px;cursor:pointer;font-size:14px;">✕</button></div>'
+      + '<div class="seg-scroll" style="flex:1;min-height:0;padding:18px;overflow:auto;">'
+      + '<div style="font-size:11.5px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#a8a3b8;margin-bottom:12px;">Conversación importada</div>'
+      + '<div style="display:flex;flex-direction:column;">'+transcript+'</div>'
+      + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="font-size:13.5px;font-weight:500;">Escribir</span><div style="margin-left:auto;display:flex;gap:6px;">'+toneChips+'</div></div>'
+      + '<textarea data-sm="draftReply" class="seg-in" placeholder="Escribe tu mensaje o genéralo con IA…" style="width:100%;min-height:84px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftReply)+'</textarea>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;"><button class="seg-ghost" data-sa="gen-reply" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
+      + '<button class="seg-primary" data-sa="send-reply" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 16px;font-size:12.5px;cursor:pointer;">Enviar</button></div></div>'
+      + '<div style="margin-top:14px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
+      + '<div style="font-size:13.5px;font-weight:500;margin-bottom:10px;">Programar follow-up</div>'
+      + '<textarea data-sm="draftFollow" class="seg-in" placeholder="Cuerpo del follow-up…" style="width:100%;min-height:64px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftFollow)+'</textarea>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">'
+      + '<input type="datetime-local" data-sm="schedInput" class="seg-in" value="'+esc(state.schedInput)+'" style="border:1px solid #e7e2f5;border-radius:9px;padding:8px 10px;font-size:12.5px;outline:none;flex:1;min-width:170px;">'
+      + '<button class="seg-ghost" data-sa="gen-follow" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
+      + '<button class="seg-primary" data-sa="sched-follow" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 15px;font-size:12.5px;cursor:pointer;">Programar</button></div>'
+      + '<div style="margin-top:14px;border-top:1px solid #f4f2fb;padding-top:12px;"><div style="font-size:11.5px;font-weight:600;color:#8b8699;margin-bottom:8px;">Programados</div>'+fuList+'</div></div>'
+      + '</div></div>';
+  }
+  function importSuggestions(){
+    var q=state.importQuery.trim().toLowerCase();
+    var imported=state.threads.map(function(t){return t.email.toLowerCase();});
+    var list=DIRECTORY.filter(function(d){ if(imported.indexOf(d.email.toLowerCase())!==-1) return false; if(!q) return true; return (d.email+" "+d.name+" "+d.company).toLowerCase().indexOf(q)!==-1; });
+    var rows=list.map(function(d){
+      return '<button class="seg-conv" data-sa="import-do" data-email="'+esc(d.email)+'" style="text-align:left;width:100%;border:none;border-bottom:1px solid #f4f2fb;background:#fff;padding:11px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;">'
+        + '<span style="width:34px;height:34px;flex:none;border-radius:9px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">'+esc(initials(d.name))+'</span>'
+        + '<span style="min-width:0;flex:1;line-height:1.3;"><span style="display:block;font-size:13.5px;font-weight:500;">'+esc(d.name)+' · '+esc(d.company)+'</span><span style="display:block;font-size:12px;font-weight:300;color:#8b8699;">'+esc(d.email)+'</span></span>'
+        + '<span style="font-size:11.5px;color:#5b3ad9;">Importar →</span></button>';
+    }).join("");
+    var custom=q&&q.indexOf("@")!==-1&&list.every(function(d){return d.email.toLowerCase()!==q;})
+      ? '<button class="seg-conv" data-sa="import-do" data-email="'+esc(q)+'" style="text-align:left;width:100%;border:none;background:#fbfaff;padding:11px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;"><span style="width:34px;height:34px;flex:none;border-radius:9px;background:#f4f2ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:15px;">＋</span><span style="min-width:0;flex:1;font-size:13px;font-weight:400;color:#5b3ad9;">Importar «'+esc(q)+'»</span></button>' : "";
+    return (rows+custom)||'<div style="padding:20px 14px;font-size:12.5px;font-weight:300;color:#a8a3b8;text-align:center;">Escribe el email de la persona para importar la conversación.</div>';
+  }
+  function renderModal(){
+    var host=document.getElementById("opseg-modal"); if(!host) return;
+    if(!active||!state.importOpen){ host.innerHTML=""; return; }
+    host.innerHTML=
+      '<div data-sa="import-close" style="position:fixed;inset:0;z-index:110;background:rgba(20,19,25,0.32);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;">'
+      + '<div style="width:100%;max-width:480px;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 30px 70px rgba(20,19,25,0.28);">'
+      + '<div style="padding:16px 18px;border-bottom:1px solid #f1eefa;"><div style="font-size:15px;font-weight:500;margin-bottom:3px;">Importar conversación</div>'
+      + '<div style="font-size:12.5px;font-weight:300;color:#8b8699;">Escribe el email de la persona; traeré todo el historial que tengáis.</div>'
+      + '<div style="position:relative;display:flex;align-items:center;margin-top:12px;"><span style="position:absolute;left:13px;font-size:14px;color:#a8a3b8;">⌕</span>'
+      + '<input id="opseg-import-input" class="seg-in" data-sm="importQuery" value="'+esc(state.importQuery)+'" placeholder="nombre@empresa.com" style="width:100%;padding:11px 14px 11px 34px;border:1px solid #e7e2f5;border-radius:11px;font-size:14px;font-weight:300;outline:none;"></div></div>'
+      + '<div id="opseg-import-sugg" class="seg-scroll" style="max-height:340px;overflow:auto;">'+importSuggestions()+'</div>'
+      + '</div></div>';
+    var i=document.getElementById("opseg-import-input"); if(i){ var v=i.value; i.focus(); i.value=""; i.value=v; }
+  }
+  function renderToast(){
+    var h=document.getElementById("opseg-toast"); if(!h) return;
+    h.innerHTML=(active&&state.toast)?'<div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:130;background:#141319;color:#fff;padding:13px 22px;border-radius:13px;font-size:14px;font-weight:300;box-shadow:0 18px 44px rgba(20,19,25,0.3);max-width:90vw;">'+esc(state.toast)+'</div>':"";
+  }
+
+  function render(){ attach(); ensureContainers(); renderInline(); renderDrawer(); renderModal(); renderToast(); }
+
+  return {
+    mount:function(el){ mountEl=el; active=true; render(); },
+    hide:function(){ active=false; var d=document.getElementById("opseg-drawer"); if(d) d.innerHTML=""; var mm=document.getElementById("opseg-modal"); if(mm) mm.innerHTML=""; var tt=document.getElementById("opseg-toast"); if(tt) tt.innerHTML=""; }
+  };
 })();
 </script>
 </body>

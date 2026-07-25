@@ -1,10 +1,9 @@
 # OnePulso · Seguimiento
 
-Prototipos estáticos (HTML + JS, sin build):
+Prototipo estático (HTML + JS, sin build):
 
-- `index.html` — portada
-- `Plataforma.html` — panel de clientes / follow-ups / tareas
-- `Seguimiento.html` — importar conversaciones + calendario de follow-ups con drag & drop
+- `index.html` — redirige a la plataforma
+- `Plataforma.html` — panel completo: Resumen · Clientes · **Seguimiento** (importar conversaciones + calendario de follow-ups con drag & drop) · Tareas
 - `assets/` — logo
 
 ## Local
