@@ -93,6 +93,8 @@
     quickAdd: null,
     horFrom: 8,
     horTo: 20,
+    franjaOpen: false,
+    franjaDraft: null,
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -483,22 +485,30 @@
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
       + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
 
-    // barra de franja horaria (de qué hora a qué hora se ve el horario)
-    var franja = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
-      + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Franja horaria</span>'
-      + '<div style="display:flex;align-items:center;gap:8px;">'
-      + '<span style="font-size:12.5px;color:#8b8699;">De</span>'
-      + '<div style="display:inline-flex;align-items:center;border:1px solid #e7e2f5;border-radius:9px;overflow:hidden;">'
-        + '<button data-act="hor-from-dec" title="Empezar antes" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">－</button>'
-        + '<span style="font-size:13px;font-weight:500;padding:0 4px;min-width:48px;text-align:center;">' + p2(first) + ':00</span>'
-        + '<button data-act="hor-from-inc" title="Empezar más tarde" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">＋</button></div>'
-      + '<span style="font-size:12.5px;color:#8b8699;">a</span>'
-      + '<div style="display:inline-flex;align-items:center;border:1px solid #e7e2f5;border-radius:9px;overflow:hidden;">'
-        + '<button data-act="hor-to-dec" title="Terminar antes" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">－</button>'
-        + '<span style="font-size:13px;font-weight:500;padding:0 4px;min-width:48px;text-align:center;">' + p2(last) + ':00</span>'
-        + '<button data-act="hor-to-inc" title="Añadir hora al final" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">＋</button></div>'
+    // barra de franja horaria (se abre un selector tipo Calendly con Guardar)
+    var dfrom = state.franjaDraft ? state.franjaDraft.from : first;
+    var dto = state.franjaDraft ? state.franjaDraft.to : last;
+    var optsFrom = "", optsTo = "";
+    for (var oh = 0; oh <= 23; oh++) optsFrom += '<option value="' + oh + '"' + (oh === dfrom ? " selected" : "") + '>' + p2(oh) + ':00</option>';
+    for (var oh2 = 1; oh2 <= 24; oh2++) optsTo += '<option value="' + oh2 + '"' + (oh2 === dto ? " selected" : "") + '>' + p2(oh2) + ':00</option>';
+    var pop = state.franjaOpen ?
+      '<div data-act="hor-franja-cancel" style="position:fixed;inset:0;z-index:55;"></div>'
+      + '<div style="position:absolute;top:calc(100% + 8px);left:14px;z-index:60;width:300px;background:#fff;border:1px solid #e3ddf7;border-radius:14px;box-shadow:0 20px 48px rgba(20,19,25,0.2);padding:16px;">'
+      + '<div style="font-size:13px;font-weight:600;margin-bottom:12px;">Define tu horario</div>'
+      + '<div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:14px;">'
+      + '<label style="flex:1;font-size:11.5px;color:#8b8699;">Desde<select id="op-franja-from" style="width:100%;margin-top:5px;padding:9px 10px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;background:#fff;cursor:pointer;outline:none;">' + optsFrom + '</select></label>'
+      + '<span style="font-size:12px;color:#a8a3b8;padding-bottom:10px;">—</span>'
+      + '<label style="flex:1;font-size:11.5px;color:#8b8699;">Hasta<select id="op-franja-to" style="width:100%;margin-top:5px;padding:9px 10px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;background:#fff;cursor:pointer;outline:none;">' + optsTo + '</select></label>'
       + '</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+      + '<button data-act="hor-franja-cancel" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;padding:8px 14px;font-size:13px;cursor:pointer;">Cancelar</button>'
+      + '<button data-act="hor-franja-save" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 18px;font-size:13px;cursor:pointer;box-shadow:0 8px 20px rgba(122,90,248,0.28);">Guardar</button>'
+      + '</div></div>' : '';
+    var franja = '<div style="position:relative;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
+      + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Franja horaria</span>'
+      + '<button data-act="hor-franja-open" style="display:inline-flex;align-items:center;gap:9px;border:1px solid ' + (state.franjaOpen ? "#7a5af8" : "#e7e2f5") + ';background:' + (state.franjaOpen ? "#f4f2ff" : "#fff") + ';color:#141319;border-radius:10px;padding:8px 14px;font-size:13.5px;font-weight:500;cursor:pointer;">🕐 ' + p2(first) + ':00 – ' + p2(last) + ':00 <span style="color:#a8a3b8;">▾</span></button>'
       + '<span style="margin-left:auto;font-size:11.5px;color:#8b8699;">' + (last - first) + ' horas visibles</span>'
+      + pop
       + '</div>';
 
     // mini-formulario para escribir una tarea nueva
@@ -590,7 +600,7 @@
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
-      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; render(); }
+      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; state.franjaOpen = false; state.franjaDraft = null; render(); }
       else if (act === "new") { flash("Formulario de alta — pendiente de conectar"); }
       else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
       else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
@@ -604,10 +614,14 @@
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
       else if (act === "hor-dur") { var dk = state.tasks[parseInt(btn.getAttribute("data-i"), 10)]; dk.durH = Math.max(1, Math.min(6, (dk.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); }
-      else if (act === "hor-from-dec") { state.quickAdd = null; state.horFrom = Math.max(0, state.horFrom - 1); render(); }
-      else if (act === "hor-from-inc") { state.quickAdd = null; state.horFrom = Math.min(state.horTo - 1, state.horFrom + 1); render(); }
-      else if (act === "hor-to-dec") { state.quickAdd = null; state.horTo = Math.max(state.horFrom + 1, state.horTo - 1); render(); }
-      else if (act === "hor-to-inc") { state.quickAdd = null; state.horTo = Math.min(24, state.horTo + 1); render(); }
+      else if (act === "hor-franja-open") { if (state.franjaOpen) { state.franjaOpen = false; state.franjaDraft = null; } else { state.franjaOpen = true; state.franjaDraft = { from: state.horFrom, to: state.horTo }; state.quickAdd = null; } render(); }
+      else if (act === "hor-franja-cancel") { state.franjaOpen = false; state.franjaDraft = null; render(); }
+      else if (act === "hor-franja-save") {
+        var fd = state.franjaDraft || { from: state.horFrom, to: state.horTo };
+        if (fd.to <= fd.from) { flash("La hora final debe ser posterior a la inicial"); return; }
+        state.horFrom = fd.from; state.horTo = fd.to; state.franjaOpen = false; state.franjaDraft = null;
+        render(); flash("Franja guardada: " + (fd.from < 10 ? "0" : "") + fd.from + ":00 – " + (fd.to < 10 ? "0" : "") + fd.to + ":00");
+      }
     });
 
     // Horario: drag & drop de tareas sobre la rejilla semanal
@@ -646,6 +660,13 @@
       }
       var zone = e.target.closest(".hor-unschedzone");
       if (zone) { e.preventDefault(); state.tasks[hdrag].start = null; hdrag = null; render(); flash("Quitada del horario"); }
+    });
+
+    // Selector de franja horaria (tipo Calendly)
+    appEl.addEventListener("change", function (e) {
+      if (!state.franjaDraft) return;
+      if (e.target.id === "op-franja-from") state.franjaDraft.from = parseInt(e.target.value, 10);
+      else if (e.target.id === "op-franja-to") state.franjaDraft.to = parseInt(e.target.value, 10);
     });
 
     // Mini-formulario de tarea (escribir)
