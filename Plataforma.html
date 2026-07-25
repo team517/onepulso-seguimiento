@@ -51,6 +51,10 @@
   .hor-block:hover { box-shadow:0 5px 14px rgba(122,90,248,0.18) !important; }
   .hor-unsched:hover { border-color:#d9d3f3 !important; background:#f7f5ff !important; }
 
+  /* --- Landing / login --- */
+  .auth-shell { display:grid; grid-template-columns:1.1fr 0.9fr; min-height:100vh; }
+  @media (max-width:820px){ .auth-shell { grid-template-columns:1fr !important; } .auth-hero { display:none !important; } }
+
   @media (max-width: 900px){ .op-shell { grid-template-columns:1fr !important; } .op-side { display:none !important; } .op-grid4 { grid-template-columns:repeat(2,1fr) !important; } .op-two { grid-template-columns:1fr !important; } .op-kanban { grid-template-columns:1fr !important; } .seg-grid { grid-template-columns:1fr !important; } .seg-drawer { width:100vw !important; } }
   @media (max-width: 560px){ .op-grid4 { grid-template-columns:1fr !important; } }
 </style>
@@ -760,7 +764,9 @@
         + '</div></div></div>';
     }
 
-    return toolbar + franja + pm
+    var logoBar = state.logo ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #edeaf7;"><img src="' + state.logo + '" alt="logo" style="height:40px;max-width:220px;"></div>' : "";
+
+    return logoBar + toolbar + franja + pm
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
       + panel
       + '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 10px 30px rgba(122,90,248,0.05);overflow:hidden;"><div class="op-scroll" style="overflow-x:auto;"><div style="min-width:720px;">'
@@ -1006,18 +1012,28 @@
   }
   function renderAuth() {
     var isS = authMode === "signup";
+    var logo = state.logo || "assets/logo-onepulso.png";
+    var bullets = [["🗓", "Horario semanal por horas"], ["🎨", "Colores y descansos"], ["⬇", "PDF con tu logo"], ["☁", "Guardado en tu cuenta"]]
+      .map(function (p) { return '<div style="display:flex;align-items:center;gap:11px;"><span style="width:28px;height:28px;flex:none;border-radius:8px;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:14px;">' + p[0] + '</span>' + p[1] + '</div>'; }).join("");
     document.getElementById("app").innerHTML =
-      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(1200px 600px at 50% -10%,#efeaff,#f7f6fc);">'
-      + '<div style="width:100%;max-width:400px;background:#fff;border:1px solid #edeaf7;border-radius:22px;padding:34px 30px;box-shadow:0 24px 60px rgba(122,90,248,0.12);">'
-      + '<img src="assets/logo-onepulso.png" alt="onepulso" style="height:30px;margin-bottom:22px;">'
-      + '<h1 style="margin:0 0 6px;font-size:23px;font-weight:400;letter-spacing:-0.02em;">' + (isS ? "Crear cuenta" : "Entrar") + '</h1>'
-      + '<p style="margin:0 0 22px;font-size:13.5px;font-weight:300;color:#8b8699;">Tu horario y tareas, guardados en tu cuenta.</p>'
-      + '<input data-authmodel="email" value="' + esc(authEmail) + '" placeholder="tu@email.com" autocomplete="username" style="width:100%;padding:12px 14px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:12px;">'
-      + '<input data-authmodel="pass" type="password" value="' + esc(authPass) + '" placeholder="Contraseña" autocomplete="' + (isS ? "new-password" : "current-password") + '" style="width:100%;padding:12px 14px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:14px;">'
+      '<div class="auth-shell">'
+      + '<div class="auth-hero" style="position:relative;overflow:hidden;padding:56px 52px;color:#fff;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(150deg,#6a48e8,#9d86fb 62%,#c9b8ff);">'
+      + '<span style="display:inline-flex;align-self:flex-start;background:#fff;padding:9px 15px;border-radius:12px;margin-bottom:40px;box-shadow:0 10px 30px rgba(20,19,25,0.15);"><img src="' + logo + '" alt="logo" style="height:26px;max-width:180px;"></span>'
+      + '<h1 style="margin:0 0 14px;font-size:38px;line-height:1.1;font-weight:500;letter-spacing:-0.02em;">Tu horario,<br>a tu manera.</h1>'
+      + '<p style="margin:0 0 32px;font-size:15px;font-weight:300;line-height:1.6;max-width:360px;opacity:.92;">Monta tu semana estilo Calendly, ponle colores y descansos, y descárgalo en PDF con tu logo.</p>'
+      + '<div style="display:flex;flex-direction:column;gap:13px;font-size:14px;font-weight:300;">' + bullets + '</div></div>'
+      + '<div style="display:flex;align-items:center;justify-content:center;padding:40px 24px;background:#f7f6fc;">'
+      + '<div style="width:100%;max-width:380px;">'
+      + '<img src="' + logo + '" alt="logo" style="height:28px;margin-bottom:22px;">'
+      + '<h2 style="margin:0 0 6px;font-size:24px;font-weight:400;letter-spacing:-0.02em;">' + (isS ? "Crea tu cuenta" : "Bienvenido de nuevo") + '</h2>'
+      + '<p style="margin:0 0 22px;font-size:13.5px;font-weight:300;color:#8b8699;">' + (isS ? "Empieza a organizar tu horario en segundos." : "Entra para ver tu horario.") + '</p>'
+      + '<input data-authmodel="email" value="' + esc(authEmail) + '" placeholder="tu@email.com" autocomplete="username" style="width:100%;padding:13px 15px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:12px;background:#fff;">'
+      + '<input data-authmodel="pass" type="password" value="' + esc(authPass) + '" placeholder="Contraseña" autocomplete="' + (isS ? "new-password" : "current-password") + '" style="width:100%;padding:13px 15px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:14px;background:#fff;">'
       + (authMsg ? '<div style="font-size:12.5px;color:#b0234c;margin-bottom:12px;">' + esc(authMsg) + '</div>' : '')
-      + '<button data-act="auth-submit" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:12px;padding:13px;font-size:14.5px;cursor:pointer;box-shadow:0 12px 26px rgba(122,90,248,0.3);">' + (isS ? "Crear cuenta" : "Entrar") + '</button>'
-      + '<div style="text-align:center;margin-top:16px;font-size:13px;color:#8b8699;">' + (isS ? "¿Ya tienes cuenta? " : "¿No tienes cuenta? ") + '<a data-act="auth-toggle" style="color:#7a5af8;cursor:pointer;">' + (isS ? "Entrar" : "Crear una") + '</a></div>'
-      + '</div></div>';
+      + '<button data-act="auth-submit" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:12px;padding:14px;font-size:15px;font-weight:400;cursor:pointer;box-shadow:0 12px 26px rgba(122,90,248,0.3);">' + (isS ? "Crear cuenta" : "Entrar") + '</button>'
+      + '<div style="text-align:center;margin-top:18px;font-size:13.5px;color:#8b8699;">' + (isS ? "¿Ya tienes cuenta? " : "¿No tienes cuenta? ") + '<a data-act="auth-toggle" style="color:#7a5af8;cursor:pointer;font-weight:500;">' + (isS ? "Entrar" : "Crear una gratis") + '</a></div>'
+      + '</div></div>'
+      + '</div>';
     var em = document.querySelector('[data-authmodel="email"]'); if (em) em.focus();
   }
   function doAuth() {
