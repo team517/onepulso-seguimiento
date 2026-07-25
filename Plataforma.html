@@ -91,6 +91,8 @@
     toast: "",
     weekStart: mondayOf(Date.now()),
     quickAdd: null,
+    horFrom: 8,
+    horTo: 20,
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -164,8 +166,8 @@
   }
   function horHourFromY(col, clientY) {
     var r = col.getBoundingClientRect();
-    var h = HOR_FIRST + Math.floor((clientY - r.top) / HOR_ROWH);
-    return Math.max(HOR_FIRST, Math.min(HOR_LAST - 1, h));
+    var h = state.horFrom + Math.floor((clientY - r.top) / HOR_ROWH);
+    return Math.max(state.horFrom, Math.min(state.horTo - 1, h));
   }
   function quickAddCreate() {
     var qa = state.quickAdd; if (!qa) return;
@@ -400,7 +402,7 @@
   }
 
   function horarioView() {
-    var first = HOR_FIRST, last = HOR_LAST, rowH = HOR_ROWH, totalH = (last - first) * rowH;
+    var first = state.horFrom, last = state.horTo, rowH = HOR_ROWH, totalH = (last - first) * rowH;
     var ws = state.weekStart, todayD = dayStartP(Date.now());
     var dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
     function p2(n) { return String(n).padStart(2, "0"); }
@@ -481,6 +483,24 @@
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
       + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
 
+    // barra de franja horaria (de qué hora a qué hora se ve el horario)
+    var franja = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
+      + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Franja horaria</span>'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<span style="font-size:12.5px;color:#8b8699;">De</span>'
+      + '<div style="display:inline-flex;align-items:center;border:1px solid #e7e2f5;border-radius:9px;overflow:hidden;">'
+        + '<button data-act="hor-from-dec" title="Empezar antes" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">－</button>'
+        + '<span style="font-size:13px;font-weight:500;padding:0 4px;min-width:48px;text-align:center;">' + p2(first) + ':00</span>'
+        + '<button data-act="hor-from-inc" title="Empezar más tarde" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">＋</button></div>'
+      + '<span style="font-size:12.5px;color:#8b8699;">a</span>'
+      + '<div style="display:inline-flex;align-items:center;border:1px solid #e7e2f5;border-radius:9px;overflow:hidden;">'
+        + '<button data-act="hor-to-dec" title="Terminar antes" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">－</button>'
+        + '<span style="font-size:13px;font-weight:500;padding:0 4px;min-width:48px;text-align:center;">' + p2(last) + ':00</span>'
+        + '<button data-act="hor-to-inc" title="Añadir hora al final" style="border:none;background:#fff;color:#5b3ad9;cursor:pointer;font-size:15px;padding:5px 10px;">＋</button></div>'
+      + '</div>'
+      + '<span style="margin-left:auto;font-size:11.5px;color:#8b8699;">' + (last - first) + ' horas visibles</span>'
+      + '</div>';
+
     // mini-formulario para escribir una tarea nueva
     var qa = state.quickAdd, qaHtml = "";
     if (qa) {
@@ -503,7 +523,7 @@
         + '</div></div>';
     }
 
-    return toolbar
+    return toolbar + franja
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
       + panel
       + '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 10px 30px rgba(122,90,248,0.05);overflow:hidden;"><div class="op-scroll" style="overflow-x:auto;"><div style="min-width:720px;">'
@@ -584,6 +604,10 @@
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
       else if (act === "hor-dur") { var dk = state.tasks[parseInt(btn.getAttribute("data-i"), 10)]; dk.durH = Math.max(1, Math.min(6, (dk.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); }
+      else if (act === "hor-from-dec") { state.quickAdd = null; state.horFrom = Math.max(0, state.horFrom - 1); render(); }
+      else if (act === "hor-from-inc") { state.quickAdd = null; state.horFrom = Math.min(state.horTo - 1, state.horFrom + 1); render(); }
+      else if (act === "hor-to-dec") { state.quickAdd = null; state.horTo = Math.max(state.horFrom + 1, state.horTo - 1); render(); }
+      else if (act === "hor-to-inc") { state.quickAdd = null; state.horTo = Math.min(24, state.horTo + 1); render(); }
     });
 
     // Horario: drag & drop de tareas sobre la rejilla semanal
