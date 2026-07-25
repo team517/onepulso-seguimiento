@@ -185,29 +185,43 @@
     state.tasks.push(t);
     return state.tasks.length - 1;
   }
-  function drawScheduleCanvas(T, done) {
-    var first = state.horFrom, last = state.horTo, rowH = 46, gut = 56, colW = 150, headH = 54, titleH = 42, pad = 12;
-    var totalH = (last - first) * rowH, W = gut + 7 * colW, H = T + titleH + headH + totalH + pad;
+  function drawScheduleCanvas(done) {
+    var SC = 2;                                   // supersampling → PDF nítido
+    var first = state.horFrom, last = state.horTo;
+    var margin = 34, gut = 62, rowH = 50, headH = 48, headerH = 84;
+    var pageW = 1120, colW = (pageW - margin * 2 - gut) / 7;
+    var totalH = (last - first) * rowH, pageH = margin + headerH + headH + totalH + margin;
+    var W = Math.round(pageW * SC), H = Math.round(pageH * SC);
     var c = document.createElement("canvas"); c.width = W; c.height = H;
-    var x = c.getContext("2d");
-    x.fillStyle = "#ffffff"; x.fillRect(0, 0, W, H);
-    var ws = state.weekStart, a = new Date(ws), b = new Date(ws + 6 * DAY);
-    var range = a.getDate() + "–" + b.getDate() + " " + MES_ES[b.getMonth()] + " " + b.getFullYear();
+    var x = c.getContext("2d"); x.scale(SC, SC); x.textBaseline = "alphabetic";
+    function rr(X, Y, w, h, r) { r = Math.min(r, w / 2, h / 2); x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r); x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath(); }
+    var ws = state.weekStart, aa = new Date(ws), bb = new Date(ws + 6 * DAY);
+    var range = aa.getDate() + "–" + bb.getDate() + " " + MES_ES[bb.getMonth()] + " " + bb.getFullYear();
+
     function paint() {
-      x.fillStyle = "#141319"; x.font = "600 20px Inter, Arial, sans-serif"; x.textAlign = "left";
-      x.fillText("Horario semanal · " + range, 16, T + 28);
-      var dayNames = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"], gridTop = T + titleH + headH;
+      x.fillStyle = "#ffffff"; x.fillRect(0, 0, pageW, pageH);
+      // título (derecha)
+      x.textAlign = "right"; x.fillStyle = "#141319"; x.font = "600 27px Inter, Arial, sans-serif";
+      x.fillText("Horario semanal", pageW - margin, margin + 30);
+      x.fillStyle = "#8b8699"; x.font = "400 15px Inter, Arial, sans-serif";
+      x.fillText("Semana del " + range, pageW - margin, margin + 54);
+      x.textAlign = "left";
+      x.strokeStyle = "#edeaf7"; x.lineWidth = 1; x.beginPath(); x.moveTo(margin, margin + headerH - 6); x.lineTo(pageW - margin, margin + headerH - 6); x.stroke();
+
+      var gridLeft = margin, gridTop = margin + headerH + headH, todayD = dayStartP(Date.now());
+      var dn = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"];
       for (var i = 0; i < 7; i++) {
-        var cx = gut + i * colW;
-        x.textAlign = "center"; x.fillStyle = "#a8a3b8"; x.font = "600 11px Inter, Arial, sans-serif";
-        x.fillText(dayNames[i], cx + colW / 2, T + titleH + 22);
-        x.fillStyle = "#141319"; x.font = "400 18px Georgia, serif";
-        x.fillText(String(new Date(ws + i * DAY).getDate()), cx + colW / 2, T + titleH + 44);
+        var cx = gridLeft + gut + i * colW, isT = dayStartP(ws + i * DAY) === todayD, mid = cx + colW / 2;
+        x.textAlign = "center"; x.fillStyle = isT ? "#7a5af8" : "#a8a3b8"; x.font = "600 11px Inter, Arial, sans-serif";
+        x.fillText(dn[i], mid, margin + headerH + 20);
+        if (isT) { x.fillStyle = "#7a5af8"; rr(mid - 16, margin + headerH + 26, 32, 24, 12); x.fill(); x.fillStyle = "#fff"; } else x.fillStyle = "#141319";
+        x.font = (isT ? "600 " : "400 ") + "17px Inter, Arial, sans-serif";
+        x.fillText(String(new Date(ws + i * DAY).getDate()), mid, margin + headerH + 43);
       }
       x.textAlign = "left";
       for (var d = 0; d < 7; d++) {
-        var colx = gut + d * colW, av = state.avail ? state.avail[d] : null;
-        x.fillStyle = "#f6f4fa"; x.fillRect(colx, gridTop, colW, totalH);
+        var colx = gridLeft + gut + d * colW, av = state.avail ? state.avail[d] : null;
+        x.fillStyle = "#f7f5fb"; x.fillRect(colx, gridTop, colW, totalH);
         if (av && av.enabled) av.ranges.forEach(function (r) {
           var t0 = (Math.max(first, r.from) - first) * rowH, hh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
           if (hh > 0) { x.save(); x.globalAlpha = 0.5; x.fillStyle = COLORS[av.color || "violet"][1]; x.fillRect(colx, gridTop + t0, colW, hh); x.restore(); }
@@ -216,48 +230,52 @@
       x.font = "400 11px Inter, Arial, sans-serif";
       for (var h = first; h <= last; h++) {
         var yy = gridTop + (h - first) * rowH;
-        x.strokeStyle = "#eeecf5"; x.beginPath(); x.moveTo(gut, yy + 0.5); x.lineTo(W, yy + 0.5); x.stroke();
-        x.fillStyle = "#a8a3b8"; x.fillText((h < 10 ? "0" : "") + h + ":00", 10, yy + 4);
+        x.strokeStyle = "#efedf6"; x.lineWidth = 1; x.beginPath(); x.moveTo(gridLeft + gut, yy + 0.5); x.lineTo(gridLeft + gut + 7 * colW, yy + 0.5); x.stroke();
+        x.fillStyle = "#a8a3b8"; x.textAlign = "right"; x.fillText((h < 10 ? "0" : "") + h + ":00", gridLeft + gut - 9, yy + 4); x.textAlign = "left";
       }
-      for (var s = 0; s <= 7; s++) { var sx = gut + s * colW; x.strokeStyle = "#e7e2f5"; x.beginPath(); x.moveTo(sx + 0.5, gridTop); x.lineTo(sx + 0.5, gridTop + totalH); x.stroke(); }
+      for (var s = 0; s <= 7; s++) { var sx = gridLeft + gut + s * colW; x.strokeStyle = "#e7e2f5"; x.beginPath(); x.moveTo(sx + 0.5, gridTop); x.lineTo(sx + 0.5, gridTop + totalH); x.stroke(); }
       state.breaks.forEach(function (bk) {
         var di = Math.floor((dayStartP(bk.start) - ws) / DAY); if (di < 0 || di > 6) return;
         var sh = new Date(bk.start).getHours(), dur = bk.durH || 1;
-        var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bh = dur * rowH - 4;
-        x.fillStyle = "#e5e2ee"; x.fillRect(bx, by, colW - 6, bh);
-        x.fillStyle = "#6f6a83"; x.font = "600 11px Inter, Arial, sans-serif"; x.fillText("Descanso: " + bk.label, bx + 6, by + 15);
+        var bx = gridLeft + gut + di * colW + 4, by = gridTop + (sh - first) * rowH + 3, bw = colW - 8, bh = dur * rowH - 6;
+        x.fillStyle = "#e7e4ef"; rr(bx, by, bw, bh, 9); x.fill();
+        x.fillStyle = "#6f6a83"; x.font = "600 12px Inter, Arial, sans-serif"; x.fillText("☕ " + bk.label, bx + 9, by + 19);
       });
       state.tasks.forEach(function (t, idx) {
         if (t.start == null) return;
         var di = Math.floor((dayStartP(t.start) - ws) / DAY); if (di < 0 || di > 6) return;
         var sh = new Date(t.start).getHours(), dur = t.durH || 1, pc = COLORS[taskColorKey(t, idx)];
-        var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bw = colW - 6, bh = dur * rowH - 4;
-        x.fillStyle = pc[0]; x.fillRect(bx, by, bw, bh);
-        x.fillStyle = pc[1]; x.fillRect(bx, by, 3, bh);
-        x.fillStyle = pc[1]; x.font = "600 10px Inter, Arial, sans-serif"; x.fillText((sh < 10 ? "0" : "") + sh + ":00", bx + 7, by + 13);
-        x.fillStyle = "#141319"; x.font = "500 12px Inter, Arial, sans-serif";
-        x.fillText(t.title.length > 19 ? t.title.slice(0, 18) + "…" : t.title, bx + 7, by + 28);
+        var bx = gridLeft + gut + di * colW + 4, by = gridTop + (sh - first) * rowH + 3, bw = colW - 8, bh = dur * rowH - 6;
+        x.save(); x.shadowColor = "rgba(20,19,25,0.10)"; x.shadowBlur = 6; x.shadowOffsetY = 2; x.fillStyle = pc[0]; rr(bx, by, bw, bh, 10); x.fill(); x.restore();
+        x.fillStyle = pc[1]; rr(bx, by, 4, bh, 2); x.fill();
+        x.fillStyle = pc[1]; x.font = "600 11px Inter, Arial, sans-serif";
+        x.fillText((sh < 10 ? "0" : "") + sh + ":00 – " + (sh + dur < 10 ? "0" : "") + (sh + dur) + ":00", bx + 12, by + 18);
+        x.fillStyle = "#1f1d29"; x.font = "500 13px Inter, Arial, sans-serif";
+        var ttl = t.title, maxc = Math.max(6, Math.floor((bw - 22) / 7.2));
+        if (ttl.length > maxc) ttl = ttl.slice(0, maxc - 1) + "…";
+        x.fillText(ttl, bx + 12, by + 35);
       });
-      done(c, range);
+      function finish() { done(c, range, pageW, pageH); }
+      if (state.logo) {
+        var img = new Image();
+        img.onload = function () { var lh = 50, lw = img.width * (lh / img.height); if (lw > 300) { lw = 300; lh = img.height * (lw / img.width); } x.drawImage(img, margin, margin + 4, lw, lh); finish(); };
+        img.onerror = function () { finish(); };
+        img.src = state.logo;
+      } else finish();
     }
-    if (T > 0 && state.logo) {
-      var img = new Image();
-      img.onload = function () { var lh = Math.min(50, T - 14); var lw = img.width * (lh / img.height); x.drawImage(img, 16, 12, lw, lh); paint(); };
-      img.onerror = function () { paint(); };
-      img.src = state.logo;
-    } else paint();
+    paint();
   }
   function downloadSchedule() {
-    var T = state.logo ? 74 : 0;
-    drawScheduleCanvas(T, function (canvas, range) {
+    drawScheduleCanvas(function (canvas, range, pw, ph) {
       var imgData = canvas.toDataURL("image/png");
       var J = window.jspdf && window.jspdf.jsPDF;
       if (!J) {
         var l = document.createElement("a"); l.href = imgData; l.download = "horario-" + range.replace(/\s+/g, "-") + ".png";
         document.body.appendChild(l); l.click(); document.body.removeChild(l); flash("Horario descargado (PNG)"); return;
       }
-      var pdf = new J({ orientation: canvas.width >= canvas.height ? "l" : "p", unit: "px", format: [canvas.width, canvas.height], compress: true });
-      pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+      var pdf = new J({ orientation: pw >= ph ? "landscape" : "portrait", unit: "px", format: [pw, ph], compress: true });
+      var W2 = pdf.internal.pageSize.getWidth(), H2 = pdf.internal.pageSize.getHeight();
+      pdf.addImage(imgData, "PNG", 0, 0, W2, H2, undefined, "FAST");
       pdf.save("horario-" + range.replace(/\s+/g, "-") + ".pdf");
       flash("Horario descargado (PDF)");
     });
@@ -268,7 +286,7 @@
     reader.onload = function (ev) {
       var img = new Image();
       img.onload = function () {
-        var maxW = 400, sc = Math.min(1, maxW / img.width), cw = Math.round(img.width * sc), ch = Math.round(img.height * sc);
+        var maxW = 600, sc = Math.min(1, maxW / img.width), cw = Math.round(img.width * sc), ch = Math.round(img.height * sc);
         var cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
         cv.getContext("2d").drawImage(img, 0, 0, cw, ch);
         state.logo = cv.toDataURL("image/png");
@@ -764,7 +782,7 @@
         + '</div></div></div>';
     }
 
-    var logoBar = state.logo ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #edeaf7;"><img src="' + state.logo + '" alt="logo" style="height:40px;max-width:220px;"></div>' : "";
+    var logoBar = state.logo ? '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #edeaf7;"><img src="' + state.logo + '" alt="logo" style="height:52px;max-width:280px;object-fit:contain;"></div>' : "";
 
     return logoBar + toolbar + franja + pm
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
