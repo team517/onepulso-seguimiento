@@ -483,7 +483,7 @@
         var cc2 = COLORS[av.color || "violet"];
         availBg = av.ranges.map(function (r) {
           var rt = (Math.max(first, r.from) - first) * rowH, rh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
-          return rh > 0 ? '<div style="position:absolute;left:0;right:0;top:' + rt + 'px;height:' + rh + 'px;background:' + cc2[0] + ';"></div>' : "";
+          return rh > 0 ? '<div style="position:absolute;left:0;right:0;top:' + rt + 'px;height:' + rh + 'px;background:' + cc2[1] + '80;"></div>' : "";
         }).join("");
       }
       var breaksHtml = perDayBreaks[d].map(function (b) {
