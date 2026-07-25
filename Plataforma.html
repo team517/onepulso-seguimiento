@@ -919,7 +919,7 @@
 
   // ===================== Supabase (login + persistencia) =====================
   var SUPA_URL = "https://eccujbiqhevqoscsudge.supabase.co";
-  var SUPA_KEY = "PEGA_AQUI_TU_PUBLISHABLE_KEY"; // sb_publishable_...  (NO la secreta)
+  var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjY3VqYmlxaGV2cW9zY3N1ZGdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMTY5MTgsImV4cCI6MjEwMDU5MjkxOH0.hPxdwnAI9UhMXyCtyZ1uqA_f9h6wq1S9W3NBpUPqMBo"; // anon public
   var supa = (window.supabase && SUPA_KEY.indexOf("PEGA_AQUI") === -1) ? window.supabase.createClient(SUPA_URL, SUPA_KEY) : null;
   var currentUser = null, booted = false, authMode = "login", authEmail = "", authPass = "", authMsg = "", saveTimer = null;
   var PERSIST = ["tasks", "breaks", "avail", "weekStart", "horFrom", "horTo", "clients", "follows"];
