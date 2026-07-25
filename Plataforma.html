@@ -80,6 +80,10 @@
   var MES_ES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
   var HOR_FIRST = 8, HOR_LAST = 20, HOR_ROWH = 46;
   var PRIO_BLOCK = { "Alta": ["#fdeaef","#b0234c"], "Media": ["#ece7ff","#5b3ad9"], "Baja": ["#e9f7ef","#1a9d54"] };
+  // Paleta de colores para los bloques del horario ([fondo, color])
+  var COLORS = { violet: ["#ece7ff","#7a5af8"], blue: ["#e4edff","#2f6bd6"], green: ["#e2f6ea","#12a150"], amber: ["#fdf1dc","#c47d10"], red: ["#fdeaef","#d63864"], teal: ["#ddf5f2","#0f9b8e"], pink: ["#fceaf5","#c23e8f"] };
+  var COLOR_ORDER = ["violet","blue","green","amber","red","teal","pink"];
+  function taskColorKey(t, idx){ return (t && t.color) || COLOR_ORDER[idx % COLOR_ORDER.length]; }
   function dayStartP(ms){ var d = new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
   function mondayOf(ms){ var d = new Date(ms); var wd = (d.getDay()+6)%7; d.setHours(0,0,0,0); return d.getTime() - wd*DAY; }
 
@@ -176,7 +180,7 @@
     var el = document.getElementById("op-qa-input"); if (el) qa.text = el.value;
     var title = (qa.text || "").trim();
     if (!title) { flash("Escribe un nombre para la tarea"); return; }
-    var extra = { title: title, client: "—", who: "XF", priority: qa.prio || "Media" };
+    var extra = { title: title, client: "—", who: "XF", priority: "Media", color: qa.color || "violet" };
     if (qa.day != null) { extra.start = qa.day + qa.hour * HOUR; extra.durH = 1; }
     newTask(extra);
     state.quickAdd = null; render();
@@ -442,10 +446,11 @@
       var dt2 = ws + d * DAY, isT2 = dayStartP(dt2) === todayD;
       var blocks = perDay[d].map(function (o) {
         var t = o.t, dur = t.durH || 1, sd = new Date(t.start), sh = sd.getHours() + sd.getMinutes() / 60;
-        var pc = PRIO_BLOCK[t.priority] || PRIO_BLOCK["Media"];
+        var pc = COLORS[taskColorKey(t, o.idx)];
         var top = (sh - first) * rowH, hgt = Math.max(26, dur * rowH - 4), sHour = Math.floor(sh);
         return '<div class="hor-block hor-drag" draggable="true" data-i="' + o.idx + '" style="position:absolute;left:3px;right:3px;top:' + top + 'px;height:' + hgt + 'px;background:' + pc[0] + ';border:1px solid ' + pc[1] + '2e;border-left:3px solid ' + pc[1] + ';border-radius:8px;padding:3px 6px;overflow:hidden;box-shadow:0 2px 6px rgba(20,19,25,0.06);">'
           + '<div style="display:flex;align-items:center;gap:3px;">'
+          + '<button data-act="hor-color" data-i="' + o.idx + '" title="Cambiar color" style="width:11px;height:11px;border-radius:50%;background:' + pc[1] + ';border:none;cursor:pointer;flex:none;padding:0;"></button>'
           + '<span style="font-size:10px;font-weight:600;color:' + pc[1] + ';white-space:nowrap;">' + p2(sHour) + ':00</span>'
           + '<button data-act="hor-dur" data-i="' + o.idx + '" data-d="-1" title="Menos duración" style="border:none;background:transparent;color:' + pc[1] + ';cursor:pointer;font-size:12px;line-height:1;padding:0 2px;">－</button>'
           + '<span style="font-size:9.5px;color:#6f6a83;white-space:nowrap;">' + dur + 'h</span>'
@@ -461,7 +466,7 @@
     // panel «sin horario»
     var uns = state.tasks.map(function (t, idx) { return { t: t, idx: idx }; }).filter(function (o) { return o.t.start == null; });
     var unsList = uns.length ? uns.map(function (o) {
-      var pc = PRIO_BLOCK[o.t.priority] || PRIO_BLOCK["Media"];
+      var pc = COLORS[taskColorKey(o.t, o.idx)];
       return '<div class="hor-unsched hor-drag" draggable="true" data-i="' + o.idx + '" style="border:1px solid #f1eefa;border-radius:10px;padding:9px 11px;margin-bottom:8px;background:#fcfbff;display:flex;gap:9px;align-items:flex-start;">'
         + '<span style="width:8px;height:8px;border-radius:2px;background:' + pc[1] + ';margin-top:5px;flex:none;"></span>'
         + '<span style="min-width:0;line-height:1.3;"><span style="display:block;font-size:12.5px;font-weight:500;color:#141319;">' + esc(o.t.title) + '</span>'
@@ -519,15 +524,15 @@
       var qLabel;
       if (qa.day != null) { var qd = new Date(qa.day); qLabel = dayNames[(qd.getDay() + 6) % 7] + " " + qd.getDate() + " · " + p2(qa.hour) + ":00"; }
       else { qLabel = "Nueva tarea · sin horario"; }
-      var prios = [["Alta", "#b0234c"], ["Media", "#5b3ad9"], ["Baja", "#1a9d54"]].map(function (p) {
-        var on = (qa.prio || "Media") === p[0];
-        return '<button data-act="qa-prio" data-p="' + p[0] + '" title="' + p[0] + '" style="width:16px;height:16px;border-radius:50%;border:2px solid ' + (on ? p[1] : "#e0dcec") + ';background:' + (on ? p[1] : "#fff") + ';cursor:pointer;padding:0;"></button>';
+      var swatches = COLOR_ORDER.map(function (k) {
+        var on = (qa.color || "violet") === k;
+        return '<button data-act="qa-color" data-c="' + k + '" title="Color" style="width:18px;height:18px;border-radius:50%;background:' + COLORS[k][1] + ';border:2px solid ' + (on ? "#141319" : "transparent") + ';cursor:pointer;padding:0;"></button>';
       }).join("");
       qaHtml = '<div id="op-qa" style="position:fixed;left:' + qLeft + 'px;top:' + qTop + 'px;z-index:70;width:250px;background:#fff;border:1px solid #e3ddf7;border-radius:13px;box-shadow:0 18px 44px rgba(20,19,25,0.2);padding:13px;">'
         + '<div style="font-size:11.5px;font-weight:500;color:#8b8699;margin-bottom:8px;">' + esc(qLabel) + '</div>'
         + '<input id="op-qa-input" class="op-search" value="' + esc(qa.text) + '" placeholder="Escribe la tarea…" style="width:100%;padding:9px 11px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;font-weight:300;outline:none;margin-bottom:10px;">'
         + '<div style="display:flex;align-items:center;gap:7px;">'
-        + '<span style="display:flex;gap:5px;align-items:center;">' + prios + '</span>'
+        + '<span style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">' + swatches + '</span>'
         + '<button data-act="qa-cancel" style="margin-left:auto;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:8px;padding:7px 11px;font-size:12.5px;cursor:pointer;">Cancelar</button>'
         + '<button data-act="qa-add" style="border:none;background:#7a5af8;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">Añadir</button>'
         + '</div></div>';
@@ -594,7 +599,7 @@
       var col0 = e.target.closest(".hor-daycol");
       if (col0 && !e.target.closest(".hor-block") && !e.target.closest("#op-qa") && !e.target.closest("[data-act]")) {
         var hr0 = horHourFromY(col0, e.clientY);
-        state.quickAdd = { day: parseInt(col0.getAttribute("data-day"), 10), hour: hr0, x: e.clientX, y: e.clientY, text: "", prio: "Media" };
+        state.quickAdd = { day: parseInt(col0.getAttribute("data-day"), 10), hour: hr0, x: e.clientX, y: e.clientY, text: "", color: "violet" };
         render(); return;
       }
       var btn = e.target.closest("[data-act]");
@@ -608,8 +613,9 @@
       else if (act === "hor-prev") { state.quickAdd = null; state.weekStart -= 7 * DAY; render(); }
       else if (act === "hor-next") { state.quickAdd = null; state.weekStart += 7 * DAY; render(); }
       else if (act === "hor-today") { state.quickAdd = null; state.weekStart = mondayOf(Date.now()); render(); }
-      else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", prio: "Media" }; render(); }
-      else if (act === "qa-prio") { if (state.quickAdd) { state.quickAdd.prio = btn.getAttribute("data-p"); render(); } }
+      else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", color: "violet" }; render(); }
+      else if (act === "qa-color") { if (state.quickAdd) { state.quickAdd.color = btn.getAttribute("data-c"); render(); } }
+      else if (act === "hor-color") { var ck = parseInt(btn.getAttribute("data-i"), 10); var tc = state.tasks[ck]; tc.color = COLOR_ORDER[(COLOR_ORDER.indexOf(taskColorKey(tc, ck)) + 1) % COLOR_ORDER.length]; render(); }
       else if (act === "qa-cancel") { state.quickAdd = null; render(); }
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
