@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=Arapey&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
   html, body { margin:0; height:100%; }
   body { background:#f7f6fc; color:#141319; font-family:"Inter", system-ui, -apple-system, sans-serif; -webkit-font-smoothing:antialiased; }
@@ -105,6 +106,8 @@
     avail: null,
     availOpen: false,
     availDraft: null,
+    logo: null,
+    persoOpen: false,
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -178,63 +181,98 @@
     state.tasks.push(t);
     return state.tasks.length - 1;
   }
-  function downloadSchedulePNG() {
+  function drawScheduleCanvas(T, done) {
     var first = state.horFrom, last = state.horTo, rowH = 46, gut = 56, colW = 150, headH = 54, titleH = 42, pad = 12;
-    var totalH = (last - first) * rowH, W = gut + 7 * colW, H = titleH + headH + totalH + pad;
+    var totalH = (last - first) * rowH, W = gut + 7 * colW, H = T + titleH + headH + totalH + pad;
     var c = document.createElement("canvas"); c.width = W; c.height = H;
     var x = c.getContext("2d");
     x.fillStyle = "#ffffff"; x.fillRect(0, 0, W, H);
     var ws = state.weekStart, a = new Date(ws), b = new Date(ws + 6 * DAY);
     var range = a.getDate() + "–" + b.getDate() + " " + MES_ES[b.getMonth()] + " " + b.getFullYear();
-    x.fillStyle = "#141319"; x.font = "600 20px Inter, Arial, sans-serif"; x.textAlign = "left";
-    x.fillText("Horario semanal · " + range, 16, 28);
-    var dayNames = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"], gridTop = titleH + headH;
-    for (var i = 0; i < 7; i++) {
-      var cx = gut + i * colW;
-      x.textAlign = "center"; x.fillStyle = "#a8a3b8"; x.font = "600 11px Inter, Arial, sans-serif";
-      x.fillText(dayNames[i], cx + colW / 2, titleH + 22);
-      x.fillStyle = "#141319"; x.font = "400 18px Georgia, serif";
-      x.fillText(String(new Date(ws + i * DAY).getDate()), cx + colW / 2, titleH + 44);
-    }
-    x.textAlign = "left";
-    for (var d = 0; d < 7; d++) {
-      var colx = gut + d * colW, av = state.avail ? state.avail[d] : null;
-      x.fillStyle = "#f6f4fa"; x.fillRect(colx, gridTop, colW, totalH);
-      if (av && av.enabled) av.ranges.forEach(function (r) {
-        var t0 = (Math.max(first, r.from) - first) * rowH, hh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
-        if (hh > 0) { x.save(); x.globalAlpha = 0.5; x.fillStyle = COLORS[av.color || "violet"][1]; x.fillRect(colx, gridTop + t0, colW, hh); x.restore(); }
+    function paint() {
+      x.fillStyle = "#141319"; x.font = "600 20px Inter, Arial, sans-serif"; x.textAlign = "left";
+      x.fillText("Horario semanal · " + range, 16, T + 28);
+      var dayNames = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"], gridTop = T + titleH + headH;
+      for (var i = 0; i < 7; i++) {
+        var cx = gut + i * colW;
+        x.textAlign = "center"; x.fillStyle = "#a8a3b8"; x.font = "600 11px Inter, Arial, sans-serif";
+        x.fillText(dayNames[i], cx + colW / 2, T + titleH + 22);
+        x.fillStyle = "#141319"; x.font = "400 18px Georgia, serif";
+        x.fillText(String(new Date(ws + i * DAY).getDate()), cx + colW / 2, T + titleH + 44);
+      }
+      x.textAlign = "left";
+      for (var d = 0; d < 7; d++) {
+        var colx = gut + d * colW, av = state.avail ? state.avail[d] : null;
+        x.fillStyle = "#f6f4fa"; x.fillRect(colx, gridTop, colW, totalH);
+        if (av && av.enabled) av.ranges.forEach(function (r) {
+          var t0 = (Math.max(first, r.from) - first) * rowH, hh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
+          if (hh > 0) { x.save(); x.globalAlpha = 0.5; x.fillStyle = COLORS[av.color || "violet"][1]; x.fillRect(colx, gridTop + t0, colW, hh); x.restore(); }
+        });
+      }
+      x.font = "400 11px Inter, Arial, sans-serif";
+      for (var h = first; h <= last; h++) {
+        var yy = gridTop + (h - first) * rowH;
+        x.strokeStyle = "#eeecf5"; x.beginPath(); x.moveTo(gut, yy + 0.5); x.lineTo(W, yy + 0.5); x.stroke();
+        x.fillStyle = "#a8a3b8"; x.fillText((h < 10 ? "0" : "") + h + ":00", 10, yy + 4);
+      }
+      for (var s = 0; s <= 7; s++) { var sx = gut + s * colW; x.strokeStyle = "#e7e2f5"; x.beginPath(); x.moveTo(sx + 0.5, gridTop); x.lineTo(sx + 0.5, gridTop + totalH); x.stroke(); }
+      state.breaks.forEach(function (bk) {
+        var di = Math.floor((dayStartP(bk.start) - ws) / DAY); if (di < 0 || di > 6) return;
+        var sh = new Date(bk.start).getHours(), dur = bk.durH || 1;
+        var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bh = dur * rowH - 4;
+        x.fillStyle = "#e5e2ee"; x.fillRect(bx, by, colW - 6, bh);
+        x.fillStyle = "#6f6a83"; x.font = "600 11px Inter, Arial, sans-serif"; x.fillText("Descanso: " + bk.label, bx + 6, by + 15);
       });
+      state.tasks.forEach(function (t, idx) {
+        if (t.start == null) return;
+        var di = Math.floor((dayStartP(t.start) - ws) / DAY); if (di < 0 || di > 6) return;
+        var sh = new Date(t.start).getHours(), dur = t.durH || 1, pc = COLORS[taskColorKey(t, idx)];
+        var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bw = colW - 6, bh = dur * rowH - 4;
+        x.fillStyle = pc[0]; x.fillRect(bx, by, bw, bh);
+        x.fillStyle = pc[1]; x.fillRect(bx, by, 3, bh);
+        x.fillStyle = pc[1]; x.font = "600 10px Inter, Arial, sans-serif"; x.fillText((sh < 10 ? "0" : "") + sh + ":00", bx + 7, by + 13);
+        x.fillStyle = "#141319"; x.font = "500 12px Inter, Arial, sans-serif";
+        x.fillText(t.title.length > 19 ? t.title.slice(0, 18) + "…" : t.title, bx + 7, by + 28);
+      });
+      done(c, range);
     }
-    x.font = "400 11px Inter, Arial, sans-serif";
-    for (var h = first; h <= last; h++) {
-      var yy = gridTop + (h - first) * rowH;
-      x.strokeStyle = "#eeecf5"; x.beginPath(); x.moveTo(gut, yy + 0.5); x.lineTo(W, yy + 0.5); x.stroke();
-      x.fillStyle = "#a8a3b8"; x.fillText((h < 10 ? "0" : "") + h + ":00", 10, yy + 4);
-    }
-    for (var s = 0; s <= 7; s++) { var sx = gut + s * colW; x.strokeStyle = "#e7e2f5"; x.beginPath(); x.moveTo(sx + 0.5, gridTop); x.lineTo(sx + 0.5, gridTop + totalH); x.stroke(); }
-    state.breaks.forEach(function (bk) {
-      var di = Math.floor((dayStartP(bk.start) - ws) / DAY); if (di < 0 || di > 6) return;
-      var sh = new Date(bk.start).getHours(), dur = bk.durH || 1;
-      var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bh = dur * rowH - 4;
-      x.fillStyle = "#e5e2ee"; x.fillRect(bx, by, colW - 6, bh);
-      x.fillStyle = "#6f6a83"; x.font = "600 11px Inter, Arial, sans-serif"; x.fillText("Descanso: " + bk.label, bx + 6, by + 15);
+    if (T > 0 && state.logo) {
+      var img = new Image();
+      img.onload = function () { var lh = Math.min(50, T - 14); var lw = img.width * (lh / img.height); x.drawImage(img, 16, 12, lw, lh); paint(); };
+      img.onerror = function () { paint(); };
+      img.src = state.logo;
+    } else paint();
+  }
+  function downloadSchedule() {
+    var T = state.logo ? 74 : 0;
+    drawScheduleCanvas(T, function (canvas, range) {
+      var imgData = canvas.toDataURL("image/png");
+      var J = window.jspdf && window.jspdf.jsPDF;
+      if (!J) {
+        var l = document.createElement("a"); l.href = imgData; l.download = "horario-" + range.replace(/\s+/g, "-") + ".png";
+        document.body.appendChild(l); l.click(); document.body.removeChild(l); flash("Horario descargado (PNG)"); return;
+      }
+      var pdf = new J({ orientation: canvas.width >= canvas.height ? "l" : "p", unit: "px", format: [canvas.width, canvas.height], compress: true });
+      pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+      pdf.save("horario-" + range.replace(/\s+/g, "-") + ".pdf");
+      flash("Horario descargado (PDF)");
     });
-    state.tasks.forEach(function (t, idx) {
-      if (t.start == null) return;
-      var di = Math.floor((dayStartP(t.start) - ws) / DAY); if (di < 0 || di > 6) return;
-      var sh = new Date(t.start).getHours(), dur = t.durH || 1, pc = COLORS[taskColorKey(t, idx)];
-      var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bw = colW - 6, bh = dur * rowH - 4;
-      x.fillStyle = pc[0]; x.fillRect(bx, by, bw, bh);
-      x.fillStyle = pc[1]; x.fillRect(bx, by, 3, bh);
-      x.fillStyle = pc[1]; x.font = "600 10px Inter, Arial, sans-serif"; x.fillText((sh < 10 ? "0" : "") + sh + ":00", bx + 7, by + 13);
-      x.fillStyle = "#141319"; x.font = "500 12px Inter, Arial, sans-serif";
-      x.fillText(t.title.length > 19 ? t.title.slice(0, 18) + "…" : t.title, bx + 7, by + 28);
-    });
-    var link = document.createElement("a");
-    link.href = c.toDataURL("image/png");
-    link.download = "horario-" + range.replace(/\s+/g, "-") + ".png";
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    flash("Horario descargado (PNG)");
+  }
+  function onLogoFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var img = new Image();
+      img.onload = function () {
+        var maxW = 400, sc = Math.min(1, maxW / img.width), cw = Math.round(img.width * sc), ch = Math.round(img.height * sc);
+        var cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+        cv.getContext("2d").drawImage(img, 0, 0, cw, ch);
+        state.logo = cv.toDataURL("image/png");
+        render(); flash("Logo añadido");
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
   }
   function horHourFromY(col, clientY) {
     var r = col.getBoundingClientRect();
@@ -606,7 +644,8 @@
       + '<button data-act="hor-today" style="border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#5b3ad9;cursor:pointer;font-size:12.5px;padding:8px 13px;">Hoy</button></div>'
       + '<div style="margin-left:auto;display:flex;align-items:center;gap:12px;">'
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
-      + '<button data-act="hor-download" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:11px;padding:10px 15px;font-size:13px;cursor:pointer;">⬇ Descargar</button>'
+      + '<button data-act="perso-open" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:11px;padding:10px 15px;font-size:13px;cursor:pointer;">🎨 Personalizar</button>'
+      + '<button data-act="hor-download" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:11px;padding:10px 15px;font-size:13px;cursor:pointer;">⬇ Descargar' + (state.logo ? " PDF" : "") + '</button>'
       + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
 
     // barra de franja horaria (se abre un selector tipo Calendly con Guardar)
@@ -703,7 +742,25 @@
         + '</div></div>';
     }
 
-    return toolbar + franja
+    // modal Personalizar (logo)
+    var pm = "";
+    if (state.persoOpen) {
+      pm = '<div data-act="perso-close" style="position:fixed;inset:0;z-index:110;background:rgba(20,19,25,0.34);display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;overflow:auto;">'
+        + '<div style="width:100%;max-width:420px;background:#fff;border-radius:18px;box-shadow:0 30px 70px rgba(20,19,25,0.28);overflow:hidden;">'
+        + '<div style="padding:18px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #f1eefa;">'
+        + '<div style="flex:1;font-size:16px;font-weight:500;">🎨 Personalizar</div>'
+        + '<button data-act="perso-close" title="Cerrar" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:18px;">✕</button></div>'
+        + '<div style="padding:20px 22px;">'
+        + '<div style="font-size:13px;font-weight:500;margin-bottom:6px;">Logo</div>'
+        + '<div style="font-size:12.5px;font-weight:300;color:#8b8699;margin-bottom:14px;">Aparecerá arriba de tu horario al descargar el PDF (y en la barra lateral).</div>'
+        + (state.logo
+            ? '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;"><img src="' + state.logo + '" alt="logo" style="max-height:52px;max-width:180px;border:1px solid #edeaf7;border-radius:8px;padding:6px;background:#fff;"><button data-act="logo-remove" style="border:1px solid #e7e2f5;background:#fff;color:#b0234c;border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;">Quitar</button></div>'
+            : '<div style="font-size:12.5px;color:#a8a3b8;margin-bottom:14px;">Aún no has puesto logo.</div>')
+        + '<label style="display:inline-flex;align-items:center;gap:8px;border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:10px;padding:10px 15px;font-size:13px;cursor:pointer;">⬆ ' + (state.logo ? "Cambiar logo" : "Subir logo") + '<input id="op-logo-input" type="file" accept="image/*" style="display:none;"></label>'
+        + '</div></div></div>';
+    }
+
+    return toolbar + franja + pm
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
       + panel
       + '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 10px 30px rgba(122,90,248,0.05);overflow:hidden;"><div class="op-scroll" style="overflow-x:auto;"><div style="min-width:720px;">'
@@ -728,7 +785,7 @@
     document.getElementById("app").innerHTML =
       '<div class="op-shell" style="display:grid; grid-template-columns:246px 1fr; min-height:100vh; background:#f7f6fc;">'
       + '<aside class="op-side" style="background:#ffffff; border-right:1px solid #edeaf7; display:flex; flex-direction:column; padding:22px 16px; position:sticky; top:0; height:100vh;">'
-      + '<div style="padding:4px 8px 26px;"><img src="assets/logo-onepulso.png" alt="onepulso" style="height:30px; width:auto; display:block;"></div>'
+      + '<div style="padding:4px 8px 26px;"><img src="' + (state.logo || "assets/logo-onepulso.png") + '" alt="logo" style="height:30px; max-width:180px; width:auto; display:block;"></div>'
       + '<div id="op-nav" style="display:flex; flex-direction:column; gap:4px;"></div>'
       + '<div style="margin-top:auto; border-top:1px solid #f1eefa; padding-top:16px; display:flex; align-items:center; gap:11px;">'
       + '<span style="width:36px; height:36px; flex:none; border-radius:50%; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600;">' + (currentUser ? esc(currentUser.email.slice(0, 2).toUpperCase()) : "XF") + '</span>'
@@ -772,7 +829,7 @@
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
-      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; state.franjaOpen = false; state.franjaDraft = null; state.availOpen = false; state.availDraft = null; render(); }
+      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; state.franjaOpen = false; state.franjaDraft = null; state.availOpen = false; state.availDraft = null; state.persoOpen = false; render(); }
       else if (act === "new") { flash("Formulario de alta — pendiente de conectar"); }
       else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
       else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
@@ -781,7 +838,10 @@
       else if (act === "hor-next") { state.quickAdd = null; state.weekStart += 7 * DAY; render(); }
       else if (act === "hor-today") { state.quickAdd = null; state.weekStart = mondayOf(Date.now()); render(); }
       else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", color: "violet", kind: "task" }; render(); }
-      else if (act === "hor-download") { downloadSchedulePNG(); }
+      else if (act === "hor-download") { downloadSchedule(); }
+      else if (act === "perso-open") { state.persoOpen = true; render(); }
+      else if (act === "perso-close") { if (e.target === btn) { state.persoOpen = false; render(); } }
+      else if (act === "logo-remove") { state.logo = null; render(); flash("Logo quitado"); }
       else if (act === "qa-color") { if (state.quickAdd) { state.quickAdd.color = btn.getAttribute("data-c"); render(); } }
       else if (act === "qa-kind") { if (state.quickAdd) { state.quickAdd.kind = btn.getAttribute("data-k"); render(); } }
       else if (act === "hor-color") { var ck = parseInt(btn.getAttribute("data-i"), 10); var tc = state.tasks[ck]; tc.color = COLOR_ORDER[(COLOR_ORDER.indexOf(taskColorKey(tc, ck)) + 1) % COLOR_ORDER.length]; render(); }
@@ -792,7 +852,7 @@
       else if (act === "av-add-range") { var ad = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ad.enabled = true; if (ad.ranges.length) { var lr = ad.ranges[ad.ranges.length - 1]; var nf = Math.min(23, lr.to); ad.ranges.push({ from: nf, to: Math.min(24, nf + 2) }); } else { ad.ranges.push({ from: 9, to: 17 }); } render(); }
       else if (act === "av-del-range") { var ad2 = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ad2.ranges.splice(parseInt(btn.getAttribute("data-r"), 10), 1); if (!ad2.ranges.length) ad2.enabled = false; render(); }
       else if (act === "av-color") { var ac = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ac.color = COLOR_ORDER[(COLOR_ORDER.indexOf(ac.color || "violet") + 1) % COLOR_ORDER.length]; render(); }
-      else if (act === "av-save") { (state.availDraft || []).forEach(function (a) { a.ranges = a.ranges.filter(function (r) { return r.to > r.from; }); if (!a.ranges.length) a.enabled = false; }); state.avail = state.availDraft; state.availDraft = null; state.availOpen = false; computeHours(); render(); flash("Horario semanal guardado"); }
+      else if (act === "av-save") { (state.availDraft || []).forEach(function (a) { a.ranges = a.ranges.filter(function (r) { return r.to > r.from; }); if (!a.ranges.length) a.enabled = false; }); state.avail = state.availDraft; state.availDraft = null; state.availOpen = false; computeHours(); render(); saveNow(); flash(currentUser ? "Horario guardado en tu cuenta" : "Horario semanal guardado"); }
       else if (act === "qa-cancel") { state.quickAdd = null; render(); }
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
@@ -860,6 +920,7 @@
     // Selector de franja horaria (tipo Calendly)
     appEl.addEventListener("change", function (e) {
       var id = e.target.id || "";
+      if (id === "op-logo-input" && e.target.files && e.target.files[0]) { onLogoFile(e.target.files[0]); return; }
       if (state.availDraft && id.indexOf("av-") === 0) {
         var pp = id.split("-"), dd = parseInt(pp[1], 10), rr = parseInt(pp[2], 10), wh = pp[3];
         if (state.availDraft[dd] && state.availDraft[dd].ranges[rr]) state.availDraft[dd].ranges[rr][wh] = parseInt(e.target.value, 10);
@@ -922,7 +983,7 @@
   var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjY3VqYmlxaGV2cW9zY3N1ZGdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMTY5MTgsImV4cCI6MjEwMDU5MjkxOH0.hPxdwnAI9UhMXyCtyZ1uqA_f9h6wq1S9W3NBpUPqMBo"; // anon public
   var supa = (window.supabase && SUPA_KEY.indexOf("PEGA_AQUI") === -1) ? window.supabase.createClient(SUPA_URL, SUPA_KEY) : null;
   var currentUser = null, booted = false, authMode = "login", authEmail = "", authPass = "", authMsg = "", saveTimer = null;
-  var PERSIST = ["tasks", "breaks", "avail", "weekStart", "horFrom", "horTo", "clients", "follows"];
+  var PERSIST = ["tasks", "breaks", "avail", "weekStart", "horFrom", "horTo", "clients", "follows", "logo"];
 
   function snapshot() { var o = {}; PERSIST.forEach(function (k) { o[k] = state[k]; }); return o; }
   function applyState(data) { if (!data) return; PERSIST.forEach(function (k) { if (data[k] !== undefined) state[k] = data[k]; }); }
@@ -937,6 +998,11 @@
     saveTimer = setTimeout(function () {
       supa.from("app_state").upsert({ user_id: currentUser.id, data: snapshot(), updated_at: new Date().toISOString() }).then(function () {}, function () {});
     }, 800);
+  }
+  function saveNow() {
+    if (!supa || !currentUser) return;
+    clearTimeout(saveTimer);
+    supa.from("app_state").upsert({ user_id: currentUser.id, data: snapshot(), updated_at: new Date().toISOString() }).then(function () {}, function () {});
   }
   function renderAuth() {
     var isS = authMode === "signup";
