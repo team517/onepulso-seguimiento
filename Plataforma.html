@@ -84,6 +84,7 @@
   var COLORS = { violet: ["#ece7ff","#7a5af8"], blue: ["#e4edff","#2f6bd6"], green: ["#e2f6ea","#12a150"], amber: ["#fdf1dc","#c47d10"], red: ["#fdeaef","#d63864"], teal: ["#ddf5f2","#0f9b8e"], pink: ["#fceaf5","#c23e8f"] };
   var COLOR_ORDER = ["violet","blue","green","amber","red","teal","pink"];
   function taskColorKey(t, idx){ return (t && t.color) || COLOR_ORDER[idx % COLOR_ORDER.length]; }
+  var _brk = 0; function brkId(){ return "brk" + (++_brk); }
   function dayStartP(ms){ var d = new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
   function mondayOf(ms){ var d = new Date(ms); var wd = (d.getDay()+6)%7; d.setHours(0,0,0,0); return d.getTime() - wd*DAY; }
 
@@ -99,6 +100,7 @@
     horTo: 20,
     franjaOpen: false,
     franjaDraft: null,
+    breaks: [],
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -179,6 +181,11 @@
     var qa = state.quickAdd; if (!qa) return;
     var el = document.getElementById("op-qa-input"); if (el) qa.text = el.value;
     var title = (qa.text || "").trim();
+    if (qa.kind === "break" && qa.day != null) {
+      state.breaks.push({ id: brkId(), start: qa.day + qa.hour * HOUR, durH: 1, label: title || "Descanso" });
+      state.quickAdd = null; render();
+      flash("Descanso añadido · " + (qa.hour < 10 ? "0" : "") + qa.hour + ":00"); return;
+    }
     if (!title) { flash("Escribe un nombre para la tarea"); return; }
     var extra = { title: title, client: "—", who: "XF", priority: "Media", color: qa.color || "violet" };
     if (qa.day != null) { extra.start = qa.day + qa.hour * HOUR; extra.durH = 1; }
@@ -441,9 +448,33 @@
       perDay[di].push({ t: t, idx: idx });
     });
 
+    var perDayBreaks = [[], [], [], [], [], [], []];
+    state.breaks.forEach(function (b) {
+      var bi = Math.floor((dayStartP(b.start) - ws) / DAY);
+      if (bi < 0 || bi > 6) return;
+      perDayBreaks[bi].push(b);
+    });
+
     var cols = "";
     for (var d = 0; d < 7; d++) {
       var dt2 = ws + d * DAY, isT2 = dayStartP(dt2) === todayD;
+      var breaksHtml = perDayBreaks[d].map(function (b) {
+        var bdur = b.durH || 1, bsd = new Date(b.start), bsh = bsd.getHours(), btop = (bsh - first) * rowH, bH = Math.max(22, bdur * rowH - 4);
+        return '<div class="hor-brk hor-bdrag" draggable="true" data-bi="' + b.id + '" style="position:absolute;left:3px;right:3px;top:' + btop + 'px;height:' + bH + 'px;border-radius:8px;padding:3px 6px;overflow:hidden;background:repeating-linear-gradient(45deg,#eeecf3,#eeecf3 6px,#e5e2ee 6px,#e5e2ee 12px);border:1px solid #ddd8e8;">'
+          + '<div style="display:flex;align-items:center;gap:3px;">'
+          + '<span style="font-size:10px;font-weight:600;color:#8b8699;white-space:nowrap;">' + p2(bsh) + ':00</span>'
+          + '<button data-act="hor-bdur" data-id="' + b.id + '" data-d="-1" title="Menos" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:12px;line-height:1;padding:0 2px;">－</button>'
+          + '<span style="font-size:9.5px;color:#8b8699;white-space:nowrap;">' + bdur + 'h</span>'
+          + '<button data-act="hor-bdur" data-id="' + b.id + '" data-d="1" title="Más" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:12px;line-height:1;padding:0 2px;">＋</button>'
+          + '<button data-act="hor-brk-del" data-id="' + b.id + '" title="Eliminar descanso" style="margin-left:auto;border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:11px;line-height:1;padding:0;">✕</button></div>'
+          + '<div style="font-size:11.5px;font-weight:500;color:#6f6a83;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">☕ ' + esc(b.label) + '</div>'
+          + '</div>';
+      }).join("");
+      var nowLine = "";
+      if (isT2) {
+        var nowT = new Date(), nh = nowT.getHours() + nowT.getMinutes() / 60;
+        if (nh >= first && nh <= last) nowLine = '<div style="position:absolute;left:0;right:0;top:' + ((nh - first) * rowH) + 'px;height:0;border-top:2px solid #ea4335;z-index:6;pointer-events:none;"><span style="position:absolute;left:-3px;top:-4px;width:7px;height:7px;border-radius:50%;background:#ea4335;"></span></div>';
+      }
       var blocks = perDay[d].map(function (o) {
         var t = o.t, dur = t.durH || 1, sd = new Date(t.start), sh = sd.getHours() + sd.getMinutes() / 60;
         var pc = COLORS[taskColorKey(t, o.idx)];
@@ -460,7 +491,7 @@
           + (hgt > 52 ? '<div style="font-size:10.5px;font-weight:300;color:#8b8699;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(t.client) + '</div>' : '')
           + '</div>';
       }).join("");
-      cols += '<div class="hor-daycol" data-day="' + dt2 + '" style="position:relative;height:' + totalH + 'px;border-left:1px solid #f1eefa;background-color:' + (isT2 ? "#fbfaff" : "#fff") + ';background-image:repeating-linear-gradient(to bottom,#f4f2fb 0,#f4f2fb 1px,transparent 1px,transparent ' + rowH + 'px);">' + blocks + '</div>';
+      cols += '<div class="hor-daycol" data-day="' + dt2 + '" style="position:relative;height:' + totalH + 'px;border-left:1px solid #f1eefa;background-color:' + (isT2 ? "#fbfaff" : "#fff") + ';background-image:repeating-linear-gradient(to bottom,#f4f2fb 0,#f4f2fb 1px,transparent 1px,transparent ' + rowH + 'px);">' + breaksHtml + nowLine + blocks + '</div>';
     }
 
     // panel «sin horario»
@@ -524,15 +555,22 @@
       var qLabel;
       if (qa.day != null) { var qd = new Date(qa.day); qLabel = dayNames[(qd.getDay() + 6) % 7] + " " + qd.getDate() + " · " + p2(qa.hour) + ":00"; }
       else { qLabel = "Nueva tarea · sin horario"; }
+      var isBreak = qa.kind === "break";
+      var kindToggle = (qa.day != null)
+        ? '<div style="display:flex;gap:6px;margin-bottom:10px;">'
+          + '<button data-act="qa-kind" data-k="task" style="flex:1;border:1px solid ' + (!isBreak ? "#7a5af8" : "#e7e2f5") + ';background:' + (!isBreak ? "#f4f2ff" : "#fff") + ';color:' + (!isBreak ? "#5b3ad9" : "#57565f") + ';border-radius:8px;padding:7px;font-size:12.5px;cursor:pointer;">Tarea</button>'
+          + '<button data-act="qa-kind" data-k="break" style="flex:1;border:1px solid ' + (isBreak ? "#7a5af8" : "#e7e2f5") + ';background:' + (isBreak ? "#f4f2ff" : "#fff") + ';color:' + (isBreak ? "#5b3ad9" : "#57565f") + ';border-radius:8px;padding:7px;font-size:12.5px;cursor:pointer;">☕ Descanso</button></div>'
+        : "";
       var swatches = COLOR_ORDER.map(function (k) {
         var on = (qa.color || "violet") === k;
         return '<button data-act="qa-color" data-c="' + k + '" title="Color" style="width:18px;height:18px;border-radius:50%;background:' + COLORS[k][1] + ';border:2px solid ' + (on ? "#141319" : "transparent") + ';cursor:pointer;padding:0;"></button>';
       }).join("");
       qaHtml = '<div id="op-qa" style="position:fixed;left:' + qLeft + 'px;top:' + qTop + 'px;z-index:70;width:250px;background:#fff;border:1px solid #e3ddf7;border-radius:13px;box-shadow:0 18px 44px rgba(20,19,25,0.2);padding:13px;">'
         + '<div style="font-size:11.5px;font-weight:500;color:#8b8699;margin-bottom:8px;">' + esc(qLabel) + '</div>'
-        + '<input id="op-qa-input" class="op-search" value="' + esc(qa.text) + '" placeholder="Escribe la tarea…" style="width:100%;padding:9px 11px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;font-weight:300;outline:none;margin-bottom:10px;">'
+        + kindToggle
+        + '<input id="op-qa-input" class="op-search" value="' + esc(qa.text) + '" placeholder="' + (isBreak ? "Nombre del descanso (opcional)" : "Escribe la tarea…") + '" style="width:100%;padding:9px 11px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;font-weight:300;outline:none;margin-bottom:10px;">'
         + '<div style="display:flex;align-items:center;gap:7px;">'
-        + '<span style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">' + swatches + '</span>'
+        + (isBreak ? '' : '<span style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">' + swatches + '</span>')
         + '<button data-act="qa-cancel" style="margin-left:auto;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:8px;padding:7px 11px;font-size:12.5px;cursor:pointer;">Cancelar</button>'
         + '<button data-act="qa-add" style="border:none;background:#7a5af8;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">Añadir</button>'
         + '</div></div>';
@@ -597,9 +635,9 @@
     document.getElementById("app").addEventListener("click", function (e) {
       // Horario: click en un hueco vacío del día -> abrir mini-formulario para escribir la tarea
       var col0 = e.target.closest(".hor-daycol");
-      if (col0 && !e.target.closest(".hor-block") && !e.target.closest("#op-qa") && !e.target.closest("[data-act]")) {
+      if (col0 && !e.target.closest(".hor-block") && !e.target.closest(".hor-brk") && !e.target.closest("#op-qa") && !e.target.closest("[data-act]")) {
         var hr0 = horHourFromY(col0, e.clientY);
-        state.quickAdd = { day: parseInt(col0.getAttribute("data-day"), 10), hour: hr0, x: e.clientX, y: e.clientY, text: "", color: "violet" };
+        state.quickAdd = { day: parseInt(col0.getAttribute("data-day"), 10), hour: hr0, x: e.clientX, y: e.clientY, text: "", color: "violet", kind: "task" };
         render(); return;
       }
       var btn = e.target.closest("[data-act]");
@@ -613,9 +651,12 @@
       else if (act === "hor-prev") { state.quickAdd = null; state.weekStart -= 7 * DAY; render(); }
       else if (act === "hor-next") { state.quickAdd = null; state.weekStart += 7 * DAY; render(); }
       else if (act === "hor-today") { state.quickAdd = null; state.weekStart = mondayOf(Date.now()); render(); }
-      else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", color: "violet" }; render(); }
+      else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", color: "violet", kind: "task" }; render(); }
       else if (act === "qa-color") { if (state.quickAdd) { state.quickAdd.color = btn.getAttribute("data-c"); render(); } }
+      else if (act === "qa-kind") { if (state.quickAdd) { state.quickAdd.kind = btn.getAttribute("data-k"); render(); } }
       else if (act === "hor-color") { var ck = parseInt(btn.getAttribute("data-i"), 10); var tc = state.tasks[ck]; tc.color = COLOR_ORDER[(COLOR_ORDER.indexOf(taskColorKey(tc, ck)) + 1) % COLOR_ORDER.length]; render(); }
+      else if (act === "hor-brk-del") { var bid = btn.getAttribute("data-id"); state.breaks = state.breaks.filter(function (x) { return x.id !== bid; }); render(); flash("Descanso eliminado"); }
+      else if (act === "hor-bdur") { var bd = state.breaks.filter(function (x) { return x.id === btn.getAttribute("data-id"); })[0]; if (bd) { bd.durH = Math.max(1, Math.min(6, (bd.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); } }
       else if (act === "qa-cancel") { state.quickAdd = null; render(); }
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
@@ -630,19 +671,21 @@
       }
     });
 
-    // Horario: drag & drop de tareas sobre la rejilla semanal
+    // Horario: drag & drop de tareas y descansos sobre la rejilla semanal
     var appEl = document.getElementById("app");
     appEl.addEventListener("dragstart", function (e) {
-      var el = e.target.closest(".hor-drag"); if (!el) return;
-      hdrag = parseInt(el.getAttribute("data-i"), 10);
-      try { e.dataTransfer.setData("text/plain", String(hdrag)); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
+      var tkEl = e.target.closest(".hor-drag"), bkEl = e.target.closest(".hor-bdrag");
+      if (tkEl) hdrag = { kind: "task", i: parseInt(tkEl.getAttribute("data-i"), 10) };
+      else if (bkEl) hdrag = { kind: "break", id: bkEl.getAttribute("data-bi") };
+      else return;
+      try { e.dataTransfer.setData("text/plain", "x"); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
     });
     appEl.addEventListener("dragend", function () {
       document.querySelectorAll(".hor-hot").forEach(function (x) { x.classList.remove("hor-hot"); });
       hdrag = null;
     });
     appEl.addEventListener("dragover", function (e) {
-      if (hdrag == null) return;
+      if (!hdrag) return;
       var col = e.target.closest(".hor-daycol");
       if (col) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; col.classList.add("hor-hot"); return; }
       var zone = e.target.closest(".hor-unschedzone");
@@ -653,19 +696,29 @@
       var zone = e.target.closest(".hor-unschedzone"); if (zone) zone.classList.remove("hor-hot");
     });
     appEl.addEventListener("drop", function (e) {
-      if (hdrag == null) return;
+      if (!hdrag) return;
       var col = e.target.closest(".hor-daycol");
       if (col) {
         e.preventDefault();
-        var hr = horHourFromY(col, e.clientY), tk = state.tasks[hdrag], lbl = tk.title;
-        tk.start = parseInt(col.getAttribute("data-day"), 10) + hr * HOUR;
-        if (!tk.durH) tk.durH = 1;
-        hdrag = null; render();
-        flash("«" + lbl + "» → " + (hr < 10 ? "0" : "") + hr + ":00");
+        var hr = horHourFromY(col, e.clientY), day = parseInt(col.getAttribute("data-day"), 10);
+        if (hdrag.kind === "task") {
+          var tk = state.tasks[hdrag.i], lbl = tk.title;
+          tk.start = day + hr * HOUR; if (!tk.durH) tk.durH = 1;
+          hdrag = null; render(); flash("«" + lbl + "» → " + (hr < 10 ? "0" : "") + hr + ":00");
+        } else {
+          var b = state.breaks.filter(function (x) { return x.id === hdrag.id; })[0];
+          if (b) b.start = day + hr * HOUR;
+          hdrag = null; render(); flash("Descanso → " + (hr < 10 ? "0" : "") + hr + ":00");
+        }
         return;
       }
       var zone = e.target.closest(".hor-unschedzone");
-      if (zone) { e.preventDefault(); state.tasks[hdrag].start = null; hdrag = null; render(); flash("Quitada del horario"); }
+      if (zone) {
+        e.preventDefault();
+        if (hdrag.kind === "task") { state.tasks[hdrag.i].start = null; render(); flash("Quitada del horario"); }
+        else { var id = hdrag.id; state.breaks = state.breaks.filter(function (x) { return x.id !== id; }); render(); flash("Descanso eliminado"); }
+        hdrag = null;
+      }
     });
 
     // Selector de franja horaria (tipo Calendly)
