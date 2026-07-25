@@ -177,6 +177,64 @@
     state.tasks.push(t);
     return state.tasks.length - 1;
   }
+  function downloadSchedulePNG() {
+    var first = state.horFrom, last = state.horTo, rowH = 46, gut = 56, colW = 150, headH = 54, titleH = 42, pad = 12;
+    var totalH = (last - first) * rowH, W = gut + 7 * colW, H = titleH + headH + totalH + pad;
+    var c = document.createElement("canvas"); c.width = W; c.height = H;
+    var x = c.getContext("2d");
+    x.fillStyle = "#ffffff"; x.fillRect(0, 0, W, H);
+    var ws = state.weekStart, a = new Date(ws), b = new Date(ws + 6 * DAY);
+    var range = a.getDate() + "–" + b.getDate() + " " + MES_ES[b.getMonth()] + " " + b.getFullYear();
+    x.fillStyle = "#141319"; x.font = "600 20px Inter, Arial, sans-serif"; x.textAlign = "left";
+    x.fillText("Horario semanal · " + range, 16, 28);
+    var dayNames = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"], gridTop = titleH + headH;
+    for (var i = 0; i < 7; i++) {
+      var cx = gut + i * colW;
+      x.textAlign = "center"; x.fillStyle = "#a8a3b8"; x.font = "600 11px Inter, Arial, sans-serif";
+      x.fillText(dayNames[i], cx + colW / 2, titleH + 22);
+      x.fillStyle = "#141319"; x.font = "400 18px Georgia, serif";
+      x.fillText(String(new Date(ws + i * DAY).getDate()), cx + colW / 2, titleH + 44);
+    }
+    x.textAlign = "left";
+    for (var d = 0; d < 7; d++) {
+      var colx = gut + d * colW, av = state.avail ? state.avail[d] : null;
+      x.fillStyle = "#f6f4fa"; x.fillRect(colx, gridTop, colW, totalH);
+      if (av && av.enabled) av.ranges.forEach(function (r) {
+        var t0 = (Math.max(first, r.from) - first) * rowH, hh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
+        if (hh > 0) { x.save(); x.globalAlpha = 0.5; x.fillStyle = COLORS[av.color || "violet"][1]; x.fillRect(colx, gridTop + t0, colW, hh); x.restore(); }
+      });
+    }
+    x.font = "400 11px Inter, Arial, sans-serif";
+    for (var h = first; h <= last; h++) {
+      var yy = gridTop + (h - first) * rowH;
+      x.strokeStyle = "#eeecf5"; x.beginPath(); x.moveTo(gut, yy + 0.5); x.lineTo(W, yy + 0.5); x.stroke();
+      x.fillStyle = "#a8a3b8"; x.fillText((h < 10 ? "0" : "") + h + ":00", 10, yy + 4);
+    }
+    for (var s = 0; s <= 7; s++) { var sx = gut + s * colW; x.strokeStyle = "#e7e2f5"; x.beginPath(); x.moveTo(sx + 0.5, gridTop); x.lineTo(sx + 0.5, gridTop + totalH); x.stroke(); }
+    state.breaks.forEach(function (bk) {
+      var di = Math.floor((dayStartP(bk.start) - ws) / DAY); if (di < 0 || di > 6) return;
+      var sh = new Date(bk.start).getHours(), dur = bk.durH || 1;
+      var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bh = dur * rowH - 4;
+      x.fillStyle = "#e5e2ee"; x.fillRect(bx, by, colW - 6, bh);
+      x.fillStyle = "#6f6a83"; x.font = "600 11px Inter, Arial, sans-serif"; x.fillText("Descanso: " + bk.label, bx + 6, by + 15);
+    });
+    state.tasks.forEach(function (t, idx) {
+      if (t.start == null) return;
+      var di = Math.floor((dayStartP(t.start) - ws) / DAY); if (di < 0 || di > 6) return;
+      var sh = new Date(t.start).getHours(), dur = t.durH || 1, pc = COLORS[taskColorKey(t, idx)];
+      var bx = gut + di * colW + 3, by = gridTop + (sh - first) * rowH + 2, bw = colW - 6, bh = dur * rowH - 4;
+      x.fillStyle = pc[0]; x.fillRect(bx, by, bw, bh);
+      x.fillStyle = pc[1]; x.fillRect(bx, by, 3, bh);
+      x.fillStyle = pc[1]; x.font = "600 10px Inter, Arial, sans-serif"; x.fillText((sh < 10 ? "0" : "") + sh + ":00", bx + 7, by + 13);
+      x.fillStyle = "#141319"; x.font = "500 12px Inter, Arial, sans-serif";
+      x.fillText(t.title.length > 19 ? t.title.slice(0, 18) + "…" : t.title, bx + 7, by + 28);
+    });
+    var link = document.createElement("a");
+    link.href = c.toDataURL("image/png");
+    link.download = "horario-" + range.replace(/\s+/g, "-") + ".png";
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    flash("Horario descargado (PNG)");
+  }
   function horHourFromY(col, clientY) {
     var r = col.getBoundingClientRect();
     var h = state.horFrom + Math.floor((clientY - r.top) / HOR_ROWH);
@@ -547,6 +605,7 @@
       + '<button data-act="hor-today" style="border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#5b3ad9;cursor:pointer;font-size:12.5px;padding:8px 13px;">Hoy</button></div>'
       + '<div style="margin-left:auto;display:flex;align-items:center;gap:12px;">'
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
+      + '<button data-act="hor-download" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:11px;padding:10px 15px;font-size:13px;cursor:pointer;">⬇ Descargar</button>'
       + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
 
     // barra de franja horaria (se abre un selector tipo Calendly con Guardar)
@@ -719,6 +778,7 @@
       else if (act === "hor-next") { state.quickAdd = null; state.weekStart += 7 * DAY; render(); }
       else if (act === "hor-today") { state.quickAdd = null; state.weekStart = mondayOf(Date.now()); render(); }
       else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", color: "violet", kind: "task" }; render(); }
+      else if (act === "hor-download") { downloadSchedulePNG(); }
       else if (act === "qa-color") { if (state.quickAdd) { state.quickAdd.color = btn.getAttribute("data-c"); render(); } }
       else if (act === "qa-kind") { if (state.quickAdd) { state.quickAdd.kind = btn.getAttribute("data-k"); render(); } }
       else if (act === "hor-color") { var ck = parseInt(btn.getAttribute("data-i"), 10); var tc = state.tasks[ck]; tc.color = COLOR_ORDER[(COLOR_ORDER.indexOf(taskColorKey(tc, ck)) + 1) % COLOR_ORDER.length]; render(); }
