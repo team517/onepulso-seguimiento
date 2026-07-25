@@ -41,6 +41,14 @@
   .seg-scroll::-webkit-scrollbar { width:9px; height:9px; }
   .seg-scroll::-webkit-scrollbar-thumb { background:#e3ddf2; border-radius:99px; }
 
+  /* --- Horario module --- */
+  .hor-drag { cursor:grab; }
+  .hor-drag:active { cursor:grabbing; }
+  .hor-daycol.hor-hot { background-color:#f4f2ff !important; }
+  .hor-unschedzone.hor-hot { outline:2px dashed #b9a7fb; outline-offset:-4px; }
+  .hor-block:hover { box-shadow:0 5px 14px rgba(122,90,248,0.18) !important; }
+  .hor-unsched:hover { border-color:#d9d3f3 !important; background:#f7f5ff !important; }
+
   @media (max-width: 900px){ .op-shell { grid-template-columns:1fr !important; } .op-side { display:none !important; } .op-grid4 { grid-template-columns:repeat(2,1fr) !important; } .op-two { grid-template-columns:1fr !important; } .op-kanban { grid-template-columns:1fr !important; } .seg-grid { grid-template-columns:1fr !important; } .seg-drawer { width:100vw !important; } }
   @media (max-width: 560px){ .op-grid4 { grid-template-columns:1fr !important; } }
 </style>
@@ -67,12 +75,21 @@
   var FOLLOW_ORDER = ["Pendiente", "Enviado", "Respondido", "Cerrado"];
   var TASK_ORDER = ["Por hacer", "En curso", "Hecho"];
 
+  // ---- Horario (schedule) helpers ---------------------------------------
+  var DAY = 86400000, HOUR = 3600000;
+  var MES_ES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  var HOR_FIRST = 8, HOR_LAST = 20, HOR_ROWH = 46;
+  var PRIO_BLOCK = { "Alta": ["#fdeaef","#b0234c"], "Media": ["#ece7ff","#5b3ad9"], "Baja": ["#e9f7ef","#1a9d54"] };
+  function dayStartP(ms){ var d = new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
+  function mondayOf(ms){ var d = new Date(ms); var wd = (d.getDay()+6)%7; d.setHours(0,0,0,0); return d.getTime() - wd*DAY; }
+
   // ---- state ------------------------------------------------------------
   var state = {
     view: "dash",
     query: "",
     followFilter: "Todos",
     toast: "",
+    weekStart: mondayOf(Date.now()),
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -101,6 +118,15 @@
       { title: "Migrar respuestas al CRM", client: "Vitalis Health", who: "LP", due: "23 jul", priority: "Baja", state: "Hecho" }
     ]
   };
+
+  // Pre-programa algunas tareas en el horario de esta semana (mismo objeto que en «Tareas»)
+  (function () {
+    var mon = state.weekStart;
+    state.tasks[3].start = mon + 1 * DAY + 9 * HOUR;  state.tasks[3].durH = 1;  // Revisar reputación — Mar 09:00
+    state.tasks[1].start = mon + 1 * DAY + 11 * HOUR; state.tasks[1].durH = 2;  // Secuencia A/B — Mar 11:00
+    state.tasks[4].start = mon + 2 * DAY + 16 * HOUR; state.tasks[4].durH = 1;  // Informe mensual — Mié 16:00
+    state.tasks[2].start = mon + 3 * DAY + 10 * HOUR; state.tasks[2].durH = 1;  // Calentar buzones — Jue 10:00
+  })();
 
   var toastTimer = null;
   function flash(msg) {
@@ -137,6 +163,17 @@
     flash("Tarea movida");
   }
 
+  function newTask(extra) {
+    var t = Object.assign({ title: "Nueva tarea", client: "—", who: "XF", due: "", priority: "Media", state: "Por hacer" }, extra || {});
+    state.tasks.push(t);
+    return state.tasks.length - 1;
+  }
+  function horHourFromY(col, clientY) {
+    var r = col.getBoundingClientRect();
+    var h = HOR_FIRST + Math.floor((clientY - r.top) / HOR_ROWH);
+    return Math.max(HOR_FIRST, Math.min(HOR_LAST - 1, h));
+  }
+
   // ---- derived view model (mirrors renderVals) --------------------------
   function vals() {
     var s = state;
@@ -147,6 +184,7 @@
       { id: "dash", label: "Resumen", icon: "◫", count: "" },
       { id: "clients", label: "Clientes", icon: "◍", count: s.clients.length },
       { id: "seg", label: "Seguimiento", icon: "✉", count: "" },
+      { id: "horario", label: "Horario", icon: "◷", count: "" },
       { id: "tasks", label: "Tareas", icon: "✓", count: abiertas }
     ];
 
@@ -154,6 +192,7 @@
       dash: ["Resumen", "Estado general de las campañas · julio 2026"],
       clients: ["Clientes", s.clients.length + " cuentas activas en la plataforma"],
       seg: ["Seguimiento", "Conversaciones y follow-ups en tu calendario"],
+      horario: ["Horario", "Tu semana · arrastra tareas para ponerles hora"],
       tasks: ["Tareas", abiertas + " tareas abiertas en el equipo"]
     };
 
@@ -171,6 +210,7 @@
       isDash: s.view === "dash",
       isClients: s.view === "clients",
       isSeg: s.view === "seg",
+      isHorario: s.view === "horario",
       isTasks: s.view === "tasks",
 
       nav: views.map(function (v) {
@@ -354,16 +394,108 @@
     return '<div class="op-kanban" style="display:grid; grid-template-columns:repeat(3,1fr); gap:18px; align-items:start;">' + cols + '</div>';
   }
 
+  function horarioView() {
+    var first = HOR_FIRST, last = HOR_LAST, rowH = HOR_ROWH, totalH = (last - first) * rowH;
+    var ws = state.weekStart, todayD = dayStartP(Date.now());
+    var dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    function p2(n) { return String(n).padStart(2, "0"); }
+
+    var a = new Date(ws), b = new Date(ws + 6 * DAY);
+    var range = a.getDate() + "–" + b.getDate() + " " + MES_ES[b.getMonth()] + " " + b.getFullYear();
+
+    // cabecera de días
+    var header = '<div style="width:54px;"></div>';
+    for (var i = 0; i < 7; i++) {
+      var dt = ws + i * DAY, isT = dayStartP(dt) === todayD;
+      header += '<div style="padding:9px 6px;text-align:center;">'
+        + '<div style="font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:' + (isT ? "#5b3ad9" : "#a8a3b8") + ';">' + dayNames[i] + '</div>'
+        + '<div class="display-num" style="font-size:20px;margin-top:1px;color:' + (isT ? "#5b3ad9" : "#141319") + ';">' + new Date(dt).getDate() + '</div></div>';
+    }
+
+    // regla de horas
+    var gutter = '<div style="position:relative;height:' + totalH + 'px;">';
+    for (var h = first; h <= last; h++) {
+      gutter += '<div style="position:absolute;top:' + ((h - first) * rowH) + 'px;right:7px;transform:translateY(-6px);font-size:10.5px;color:#a8a3b8;">' + p2(h) + ':00</div>';
+    }
+    gutter += '</div>';
+
+    // bloques por día
+    var perDay = [[], [], [], [], [], [], []];
+    state.tasks.forEach(function (t, idx) {
+      if (t.start == null) return;
+      var di = Math.floor((dayStartP(t.start) - ws) / DAY);
+      if (di < 0 || di > 6) return;
+      perDay[di].push({ t: t, idx: idx });
+    });
+
+    var cols = "";
+    for (var d = 0; d < 7; d++) {
+      var dt2 = ws + d * DAY, isT2 = dayStartP(dt2) === todayD;
+      var blocks = perDay[d].map(function (o) {
+        var t = o.t, dur = t.durH || 1, sd = new Date(t.start), sh = sd.getHours() + sd.getMinutes() / 60;
+        var pc = PRIO_BLOCK[t.priority] || PRIO_BLOCK["Media"];
+        var top = (sh - first) * rowH, hgt = Math.max(26, dur * rowH - 4), sHour = Math.floor(sh);
+        return '<div class="hor-block hor-drag" draggable="true" data-i="' + o.idx + '" style="position:absolute;left:3px;right:3px;top:' + top + 'px;height:' + hgt + 'px;background:' + pc[0] + ';border:1px solid ' + pc[1] + '2e;border-left:3px solid ' + pc[1] + ';border-radius:8px;padding:3px 6px;overflow:hidden;box-shadow:0 2px 6px rgba(20,19,25,0.06);">'
+          + '<div style="display:flex;align-items:center;gap:3px;">'
+          + '<span style="font-size:10px;font-weight:600;color:' + pc[1] + ';white-space:nowrap;">' + p2(sHour) + ':00</span>'
+          + '<button data-act="hor-dur" data-i="' + o.idx + '" data-d="-1" title="Menos duración" style="border:none;background:transparent;color:' + pc[1] + ';cursor:pointer;font-size:12px;line-height:1;padding:0 2px;">－</button>'
+          + '<span style="font-size:9.5px;color:#6f6a83;white-space:nowrap;">' + dur + 'h</span>'
+          + '<button data-act="hor-dur" data-i="' + o.idx + '" data-d="1" title="Más duración" style="border:none;background:transparent;color:' + pc[1] + ';cursor:pointer;font-size:12px;line-height:1;padding:0 2px;">＋</button>'
+          + '<button data-act="hor-unsched-btn" data-i="' + o.idx + '" title="Quitar del horario" style="margin-left:auto;border:none;background:transparent;color:' + pc[1] + ';cursor:pointer;font-size:11px;line-height:1;padding:0;">✕</button></div>'
+          + '<div style="font-size:12px;font-weight:500;color:#141319;line-height:1.15;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(t.title) + '</div>'
+          + (hgt > 52 ? '<div style="font-size:10.5px;font-weight:300;color:#8b8699;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(t.client) + '</div>' : '')
+          + '</div>';
+      }).join("");
+      cols += '<div class="hor-daycol" data-day="' + dt2 + '" style="position:relative;height:' + totalH + 'px;border-left:1px solid #f1eefa;background-color:' + (isT2 ? "#fbfaff" : "#fff") + ';background-image:repeating-linear-gradient(to bottom,#f4f2fb 0,#f4f2fb 1px,transparent 1px,transparent ' + rowH + 'px);">' + blocks + '</div>';
+    }
+
+    // panel «sin horario»
+    var uns = state.tasks.map(function (t, idx) { return { t: t, idx: idx }; }).filter(function (o) { return o.t.start == null; });
+    var unsList = uns.length ? uns.map(function (o) {
+      var pc = PRIO_BLOCK[o.t.priority] || PRIO_BLOCK["Media"];
+      return '<div class="hor-unsched hor-drag" draggable="true" data-i="' + o.idx + '" style="border:1px solid #f1eefa;border-radius:10px;padding:9px 11px;margin-bottom:8px;background:#fcfbff;display:flex;gap:9px;align-items:flex-start;">'
+        + '<span style="width:8px;height:8px;border-radius:2px;background:' + pc[1] + ';margin-top:5px;flex:none;"></span>'
+        + '<span style="min-width:0;line-height:1.3;"><span style="display:block;font-size:12.5px;font-weight:500;color:#141319;">' + esc(o.t.title) + '</span>'
+        + '<span style="display:block;font-size:11px;font-weight:300;color:#8b8699;">' + esc(o.t.client) + '</span></span></div>';
+    }).join("") : '<div style="font-size:12px;font-weight:300;color:#a8a3b8;padding:6px 2px;">Todo tiene horario 🎉</div>';
+
+    var panel = '<div class="hor-unschedzone" style="background:#fff;border:1px solid #edeaf7;border-radius:18px;padding:15px;box-shadow:0 8px 22px rgba(122,90,248,0.05);">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;"><span style="font-size:13.5px;font-weight:500;">Sin horario</span>'
+      + '<button data-act="hor-new" style="margin-left:auto;border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:9px;padding:6px 11px;font-size:12px;cursor:pointer;">+ Nueva</button></div>'
+      + unsList
+      + '<div style="font-size:11px;font-weight:300;color:#a8a3b8;margin-top:8px;line-height:1.5;">Arrastra una tarea al día y la hora que quieras. Suelta un bloque aquí para quitarle el horario.</div>'
+      + '</div>';
+
+    var toolbar = '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">'
+      + '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<button data-act="hor-prev" style="width:34px;height:34px;border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#57565f;cursor:pointer;font-size:15px;">‹</button>'
+      + '<button data-act="hor-next" style="width:34px;height:34px;border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#57565f;cursor:pointer;font-size:15px;">›</button>'
+      + '<span style="font-size:16px;font-weight:400;margin:0 4px;">Semana del ' + range + '</span>'
+      + '<button data-act="hor-today" style="border:1px solid #e7e2f5;background:#fff;border-radius:10px;color:#5b3ad9;cursor:pointer;font-size:12.5px;padding:8px 13px;">Hoy</button></div>'
+      + '<div style="margin-left:auto;display:flex;align-items:center;gap:12px;">'
+      + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
+      + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
+
+    return toolbar
+      + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
+      + panel
+      + '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 10px 30px rgba(122,90,248,0.05);overflow:hidden;"><div class="op-scroll" style="overflow-x:auto;"><div style="min-width:720px;">'
+      + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);border-bottom:1px solid #f1eefa;background:#fbfaff;">' + header + '</div>'
+      + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);">' + gutter + cols + '</div>'
+      + '</div></div></div></div>';
+  }
+
   function content(v) {
     if (v.isDash) return dashView(v);
     if (v.isClients) return clientsView(v);
     if (v.isSeg) return '<div id="op-seg-mount"></div>';
+    if (v.isHorario) return horarioView();
     if (v.isTasks) return tasksView(v);
     return "";
   }
 
   // ---- render: shell ----------------------------------------------------
-  var built = false;
+  var built = false, hdrag = null;
   function buildShell() {
     document.getElementById("app").innerHTML =
       '<div class="op-shell" style="display:grid; grid-template-columns:246px 1fr; min-height:100vh; background:#f7f6fc;">'
@@ -400,6 +532,14 @@
 
     // event delegation for all clicks
     document.getElementById("app").addEventListener("click", function (e) {
+      // Horario: click en un hueco vacío del día -> crear un bloque a esa hora
+      var col0 = e.target.closest(".hor-daycol");
+      if (col0 && !e.target.closest(".hor-block") && !e.target.closest("[data-act]")) {
+        var hr0 = horHourFromY(col0, e.clientY);
+        newTask({ start: parseInt(col0.getAttribute("data-day"), 10) + hr0 * HOUR, durH: 1 });
+        render(); flash("Bloque creado a las " + (hr0 < 10 ? "0" : "") + hr0 + ":00");
+        return;
+      }
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
@@ -408,6 +548,50 @@
       else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
       else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
       else if (act === "advtask") { advanceTask(parseInt(btn.getAttribute("data-i"), 10)); }
+      else if (act === "hor-prev") { state.weekStart -= 7 * DAY; render(); }
+      else if (act === "hor-next") { state.weekStart += 7 * DAY; render(); }
+      else if (act === "hor-today") { state.weekStart = mondayOf(Date.now()); render(); }
+      else if (act === "hor-new") { newTask(); render(); flash("Tarea creada — arrástrala al horario"); }
+      else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
+      else if (act === "hor-dur") { var dk = state.tasks[parseInt(btn.getAttribute("data-i"), 10)]; dk.durH = Math.max(1, Math.min(6, (dk.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); }
+    });
+
+    // Horario: drag & drop de tareas sobre la rejilla semanal
+    var appEl = document.getElementById("app");
+    appEl.addEventListener("dragstart", function (e) {
+      var el = e.target.closest(".hor-drag"); if (!el) return;
+      hdrag = parseInt(el.getAttribute("data-i"), 10);
+      try { e.dataTransfer.setData("text/plain", String(hdrag)); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
+    });
+    appEl.addEventListener("dragend", function () {
+      document.querySelectorAll(".hor-hot").forEach(function (x) { x.classList.remove("hor-hot"); });
+      hdrag = null;
+    });
+    appEl.addEventListener("dragover", function (e) {
+      if (hdrag == null) return;
+      var col = e.target.closest(".hor-daycol");
+      if (col) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; col.classList.add("hor-hot"); return; }
+      var zone = e.target.closest(".hor-unschedzone");
+      if (zone) { e.preventDefault(); zone.classList.add("hor-hot"); }
+    });
+    appEl.addEventListener("dragleave", function (e) {
+      var col = e.target.closest(".hor-daycol"); if (col) col.classList.remove("hor-hot");
+      var zone = e.target.closest(".hor-unschedzone"); if (zone) zone.classList.remove("hor-hot");
+    });
+    appEl.addEventListener("drop", function (e) {
+      if (hdrag == null) return;
+      var col = e.target.closest(".hor-daycol");
+      if (col) {
+        e.preventDefault();
+        var hr = horHourFromY(col, e.clientY), tk = state.tasks[hdrag], lbl = tk.title;
+        tk.start = parseInt(col.getAttribute("data-day"), 10) + hr * HOUR;
+        if (!tk.durH) tk.durH = 1;
+        hdrag = null; render();
+        flash("«" + lbl + "» → " + (hr < 10 ? "0" : "") + hr + ":00");
+        return;
+      }
+      var zone = e.target.closest(".hor-unschedzone");
+      if (zone) { e.preventDefault(); state.tasks[hdrag].start = null; hdrag = null; render(); flash("Quitada del horario"); }
     });
 
     built = true;
@@ -443,7 +627,7 @@
     if (search.value !== state.query) search.value = state.query;
     document.getElementById("op-content").innerHTML = content(v);
     var tools = document.getElementById("op-headtools");
-    if (tools) tools.style.display = v.isSeg ? "none" : "flex";
+    if (tools) tools.style.display = (v.isSeg || v.isHorario) ? "none" : "flex";
     if (v.isSeg) { if (window.OPSEG) OPSEG.mount(document.getElementById("op-seg-mount")); }
     else { if (window.OPSEG) OPSEG.hide(); }
     renderToast();
