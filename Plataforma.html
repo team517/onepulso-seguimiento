@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OnePulso · Plataforma</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=Arapey&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:#f7f6fc; color:#141319; font-family:"Inter", system-ui, -apple-system, sans-serif; -webkit-font-smoothing:antialiased; }
+  * { box-sizing:border-box; }
+  a { color:#7a5af8; text-decoration:none; }
+  a:hover { color:#6a48e8; }
+  ::selection { background:#ece7ff; }
+  .display-num { font-family:"Arapey", Georgia, serif; font-weight:400; }
+  button { font-family:inherit; }
+  input, select { font-family:inherit; }
+  .op-scroll::-webkit-scrollbar { width:9px; }
+  .op-scroll::-webkit-scrollbar-thumb { background:#e3ddf2; border-radius:99px; }
+
+  /* hover / focus states ported from the design's style-hover / style-focus */
+  .op-search:focus { border-color:#7a5af8 !important; box-shadow:0 0 0 3px rgba(122,90,248,0.13); }
+  .op-new:hover { background:#6a48e8 !important; }
+  .op-followadv:hover { background:#f4f2ff !important; border-color:#d9d3f3 !important; }
+  .op-taskadv:hover { background:#f4f2ff !important; }
+  .op-nav:hover { background:#f2effc; }
+
+  @media (max-width: 900px){ .op-shell { grid-template-columns:1fr !important; } .op-side { display:none !important; } .op-grid4 { grid-template-columns:repeat(2,1fr) !important; } .op-two { grid-template-columns:1fr !important; } .op-kanban { grid-template-columns:1fr !important; } }
+  @media (max-width: 560px){ .op-grid4 { grid-template-columns:1fr !important; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+"use strict";
+(function () {
+  // ---- helpers ----------------------------------------------------------
+  var esc = function (s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+
+  var PILL = function (bg, fg) {
+    return "display:inline-flex; align-items:center; padding:5px 11px; border-radius:99px; font-size:12.5px; font-weight:400; background:" + bg + "; color:" + fg + ";";
+  };
+  var STATUS_PILL = { "Activo": PILL("#e4f7ed", "#12784a"), "Onboarding": PILL("#ece7ff", "#5b3ad9"), "Pausa": PILL("#fdf0e3", "#a2670f"), "Renovación": PILL("#e6f1ff", "#1f5bb5") };
+  var FOLLOW_PILL = { "Pendiente": PILL("#fdf0e3", "#a2670f"), "Enviado": PILL("#ece7ff", "#5b3ad9"), "Respondido": PILL("#e4f7ed", "#12784a"), "Cerrado": PILL("#f1f0f5", "#6f6a83") };
+  var PRIO_PILL = { "Alta": PILL("#fdeaef", "#b0234c"), "Media": PILL("#ece7ff", "#5b3ad9"), "Baja": PILL("#f1f0f5", "#6f6a83") };
+  var FOLLOW_ORDER = ["Pendiente", "Enviado", "Respondido", "Cerrado"];
+  var TASK_ORDER = ["Por hacer", "En curso", "Hecho"];
+
+  // ---- state ------------------------------------------------------------
+  var state = {
+    view: "dash",
+    query: "",
+    followFilter: "Todos",
+    toast: "",
+    clients: [
+      { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
+      { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
+      { name: "Cedra Talent", sector: "RRHH", owner: "Xavier F.", meetings: 9, leads: 154, status: "Onboarding" },
+      { name: "Nordic Fintech", sector: "Fintech", owner: "Luis P.", meetings: 31, leads: 520, status: "Renovación" },
+      { name: "Alma Legal", sector: "Legal B2B", owner: "Marta R.", meetings: 6, leads: 98, status: "Pausa" },
+      { name: "Ridge Logistics", sector: "Logística", owner: "Luis P.", meetings: 21, leads: 347, status: "Activo" },
+      { name: "Kora Analytics", sector: "SaaS datos", owner: "Xavier F.", meetings: 13, leads: 221, status: "Onboarding" }
+    ],
+    follows: [
+      { contact: "María Serrano", company: "Vitalis Health", subject: "Propuesta Q3", step: "Follow-up 2/4", due: "Hoy · 11:00", state: "Pendiente", icon: "✉" },
+      { contact: "Jordi Puig", company: "Nordic Fintech", subject: "Renovación anual", step: "Follow-up 1/3", due: "Hoy · 16:30", state: "Enviado", icon: "✦" },
+      { contact: "Elena Ruiz", company: "Bloom Studio", subject: "Casos de éxito", step: "Follow-up 3/4", due: "Mañana", state: "Respondido", icon: "◎" },
+      { contact: "Tomás Vidal", company: "Cedra Talent", subject: "Kickoff campaña", step: "Follow-up 1/4", due: "28 jul", state: "Pendiente", icon: "✉" },
+      { contact: "Nuria Camps", company: "Ridge Logistics", subject: "Ampliar buzones", step: "Follow-up 2/3", due: "29 jul", state: "Enviado", icon: "✦" },
+      { contact: "Iván Costa", company: "Kora Analytics", subject: "Revisión copy", step: "Follow-up 4/4", due: "30 jul", state: "Cerrado", icon: "◎" }
+    ],
+    tasks: [
+      { title: "Validar 800 leads del ICP de Vitalis", client: "Vitalis Health", who: "MR", due: "Hoy", priority: "Alta", state: "Por hacer" },
+      { title: "Escribir secuencia A/B para Cedra", client: "Cedra Talent", who: "XF", due: "Hoy", priority: "Alta", state: "Por hacer" },
+      { title: "Calentar 6 buzones nuevos", client: "Ridge Logistics", who: "LP", due: "28 jul", priority: "Media", state: "Por hacer" },
+      { title: "Revisar reputación de dominios", client: "Nordic Fintech", who: "LP", due: "Hoy", priority: "Alta", state: "En curso" },
+      { title: "Preparar informe mensual", client: "Bloom Studio", who: "MR", due: "29 jul", priority: "Media", state: "En curso" },
+      { title: "Actualizar ICP tras feedback", client: "Kora Analytics", who: "XF", due: "31 jul", priority: "Baja", state: "En curso" },
+      { title: "Agendar discovery con Alma Legal", client: "Alma Legal", who: "XF", due: "24 jul", priority: "Media", state: "Hecho" },
+      { title: "Migrar respuestas al CRM", client: "Vitalis Health", who: "LP", due: "23 jul", priority: "Baja", state: "Hecho" }
+    ]
+  };
+
+  var toastTimer = null;
+  function flash(msg) {
+    clearTimeout(toastTimer);
+    state.toast = msg;
+    renderToast();
+    toastTimer = setTimeout(function () { state.toast = ""; renderToast(); }, 1900);
+  }
+
+  function navStyle(active) {
+    return "display:flex; align-items:center; gap:11px; width:100%; text-align:left; padding:11px 13px; border-radius:12px; border:none; cursor:pointer; font-size:14.5px; letter-spacing:-0.01em; transition:background .18s;"
+      + (active ? "background:#f2effc; color:#5b3ad9; font-weight:500;" : "background:transparent; color:#57565f; font-weight:300;");
+  }
+
+  function matches(text) {
+    var q = state.query.trim().toLowerCase();
+    return !q || text.toLowerCase().indexOf(q) !== -1;
+  }
+
+  // ---- actions ----------------------------------------------------------
+  function advanceFollow(i) {
+    var cur = FOLLOW_ORDER.indexOf(state.follows[i].state);
+    var next = FOLLOW_ORDER[Math.min(cur + 1, FOLLOW_ORDER.length - 1)];
+    state.follows[i] = Object.assign({}, state.follows[i], { state: next });
+    render();
+    flash(state.follows[i].contact + " → " + next);
+  }
+
+  function advanceTask(idx) {
+    var t = state.tasks[idx];
+    var next = TASK_ORDER[Math.min(TASK_ORDER.indexOf(t.state) + 1, 2)];
+    state.tasks[idx] = Object.assign({}, t, { state: next });
+    render();
+    flash("Tarea movida");
+  }
+
+  // ---- derived view model (mirrors renderVals) --------------------------
+  function vals() {
+    var s = state;
+    var pendientes = s.follows.filter(function (f) { return f.state === "Pendiente"; }).length;
+    var abiertas = s.tasks.filter(function (t) { return t.state !== "Hecho"; }).length;
+
+    var views = [
+      { id: "dash", label: "Resumen", icon: "◫", count: "" },
+      { id: "clients", label: "Clientes", icon: "◍", count: s.clients.length },
+      { id: "follow", label: "Follow-ups", icon: "✉", count: pendientes },
+      { id: "tasks", label: "Tareas", icon: "✓", count: abiertas }
+    ];
+
+    var heads = {
+      dash: ["Resumen", "Estado general de las campañas · julio 2026"],
+      clients: ["Clientes", s.clients.length + " cuentas activas en la plataforma"],
+      follow: ["Follow-ups", pendientes + " secuencias esperando acción"],
+      tasks: ["Tareas", abiertas + " tareas abiertas en el equipo"]
+    };
+
+    var maxMeet = Math.max.apply(null, s.clients.map(function (c) { return c.meetings; }));
+
+    var filteredFollows = s.follows
+      .map(function (f, i) { return Object.assign({ i: i }, f); })
+      .filter(function (f) { return (s.followFilter === "Todos" || f.state === s.followFilter) && matches(f.contact + " " + f.company + " " + f.subject); });
+
+    return {
+      title: heads[s.view][0],
+      subtitle: heads[s.view][1],
+      query: s.query,
+      toast: s.toast,
+      isDash: s.view === "dash",
+      isClients: s.view === "clients",
+      isFollow: s.view === "follow",
+      isTasks: s.view === "tasks",
+
+      nav: views.map(function (v) {
+        return {
+          id: v.id,
+          label: v.label,
+          icon: v.icon,
+          count: v.count,
+          style: navStyle(s.view === v.id),
+          badgeStyle: v.count === "" ? "display:none;" : "margin-left:auto; font-size:12px; font-weight:400; color:#8b8699; background:#f4f2ff; padding:2px 8px; border-radius:99px;"
+        };
+      }),
+
+      kpis: [
+        { label: "Reuniones mes", value: "68", delta: "▲ 14% vs. junio" },
+        { label: "Reply rate", value: "23%", delta: "▲ 2,1 pts" },
+        { label: "Leads activos", value: "2.020", delta: "▲ 318 nuevos" },
+        { label: "Clientes", value: String(s.clients.length), delta: "▲ 2 este mes" }
+      ],
+
+      activity: s.clients.slice(0, 5).map(function (c) {
+        return { name: c.name, value: c.meetings + " reuniones", pct: Math.round((c.meetings / maxMeet) * 100) + "%" };
+      }),
+
+      today: [
+        { icon: "✆", title: "Discovery — Nordic Fintech", meta: "Jordi Puig · Google Meet", time: "11:00" },
+        { icon: "✉", title: "Enviar follow-up 2 a Vitalis", meta: "Secuencia Q3 · 240 contactos", time: "13:30" },
+        { icon: "◎", title: "Revisar respuestas de Ridge", meta: "18 sin clasificar", time: "16:00" },
+        { icon: "✓", title: "Informe semanal Bloom Studio", meta: "Marta R.", time: "18:00" }
+      ],
+
+      clients: s.clients
+        .filter(function (c) { return matches(c.name + " " + c.sector + " " + c.owner); })
+        .map(function (c) {
+          return {
+            name: c.name, sector: c.sector, owner: c.owner, meetings: c.meetings, leads: c.leads, status: c.status,
+            initials: c.name.split(" ").map(function (w) { return w[0]; }).join("").slice(0, 2).toUpperCase(),
+            pill: STATUS_PILL[c.status]
+          };
+        }),
+
+      followFilters: ["Todos", "Pendiente", "Enviado", "Respondido"].map(function (f) {
+        return {
+          label: f,
+          style: "border:1px solid " + (s.followFilter === f ? "#7a5af8" : "#e7e2f5") + "; background:" + (s.followFilter === f ? "#f4f2ff" : "#fff") + "; color:" + (s.followFilter === f ? "#5b3ad9" : "#57565f") + "; border-radius:11px; padding:9px 16px; font-size:13.5px; font-weight:400; cursor:pointer;"
+        };
+      }),
+
+      follows: filteredFollows.map(function (f) {
+        return {
+          i: f.i, contact: f.contact, company: f.company, subject: f.subject, step: f.step, due: f.due, state: f.state, icon: f.icon,
+          pill: FOLLOW_PILL[f.state],
+          action: f.state === "Cerrado" ? "Reabrir" : "Avanzar"
+        };
+      }),
+
+      columns: TASK_ORDER.map(function (col, ci) {
+        return {
+          label: col,
+          dot: ["#f0a02e", "#7a5af8", "#1a9d54"][ci],
+          count: s.tasks.filter(function (t) { return t.state === col; }).length,
+          items: s.tasks
+            .map(function (t, idx) { return { t: t, idx: idx }; })
+            .filter(function (o) { return o.t.state === col && matches(o.t.title + " " + o.t.client); })
+            .map(function (o) {
+              var t = o.t;
+              return {
+                idx: o.idx, title: t.title, client: t.client, who: t.who, due: t.due, priority: t.priority,
+                pill: PRIO_PILL[t.priority],
+                action: col === "Hecho" ? "Archivar" : "Mover →"
+              };
+            })
+        };
+      })
+    };
+  }
+
+  // ---- render: page views ----------------------------------------------
+  function dashView(v) {
+    var kpis = v.kpis.map(function (k) {
+      return '<div style="background:#fff; border:1px solid #edeaf7; border-radius:18px; padding:22px 22px 20px; box-shadow:0 8px 22px rgba(122,90,248,0.05);">'
+        + '<div style="font-size:12.5px; font-weight:400; letter-spacing:0.08em; text-transform:uppercase; color:#a8a3b8;">' + esc(k.label) + '</div>'
+        + '<div class="display-num" style="margin-top:12px; font-size:42px; line-height:1; letter-spacing:-0.02em; color:#141319;">' + esc(k.value) + '</div>'
+        + '<div style="margin-top:10px; font-size:13px; font-weight:300; color:#1a9d54;">' + esc(k.delta) + '</div>'
+        + '</div>';
+    }).join("");
+
+    var activity = v.activity.map(function (a) {
+      return '<div><div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:7px;">'
+        + '<span style="font-size:14.5px; font-weight:400; color:#141319;">' + esc(a.name) + '</span>'
+        + '<span style="font-size:13px; font-weight:400; color:#5b3ad9;">' + esc(a.value) + '</span></div>'
+        + '<div style="height:8px; border-radius:99px; background:#f2effc; overflow:hidden;">'
+        + '<span style="display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,#9d86fb,#7a5af8); width:' + esc(a.pct) + ';"></span></div></div>';
+    }).join("");
+
+    var today = v.today.map(function (t) {
+      return '<div style="display:flex; align-items:flex-start; gap:12px; padding:13px 15px; border:1px solid #f1eefa; border-radius:13px; background:#fcfbff;">'
+        + '<span style="width:30px; height:30px; flex:none; border-radius:9px; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:14px;">' + esc(t.icon) + '</span>'
+        + '<span style="line-height:1.4; min-width:0;">'
+        + '<span style="display:block; font-size:14px; font-weight:400; color:#141319;">' + esc(t.title) + '</span>'
+        + '<span style="display:block; font-size:12.5px; font-weight:300; color:#8b8699;">' + esc(t.meta) + '</span></span>'
+        + '<span style="margin-left:auto; font-size:12px; font-weight:400; color:#7a5af8; white-space:nowrap;">' + esc(t.time) + '</span></div>';
+    }).join("");
+
+    return '<div>'
+      + '<div class="op-grid4" style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px;">' + kpis + '</div>'
+      + '<div class="op-two" style="margin-top:22px; display:grid; grid-template-columns:1.25fr 1fr; gap:20px; align-items:start;">'
+      + '<div style="background:#fff; border:1px solid #edeaf7; border-radius:20px; box-shadow:0 8px 22px rgba(122,90,248,0.05); overflow:hidden;">'
+      + '<div style="padding:20px 24px 14px; display:flex; align-items:center; justify-content:space-between; gap:14px;">'
+      + '<h2 style="margin:0; font-size:17px; font-weight:500; letter-spacing:-0.01em;">Actividad por cliente</h2>'
+      + '<span style="font-size:12.5px; font-weight:300; color:#8b8699;">Reuniones · últimos 30 días</span></div>'
+      + '<div style="padding:6px 24px 24px; display:flex; flex-direction:column; gap:15px;">' + activity + '</div></div>'
+      + '<div style="background:#fff; border:1px solid #edeaf7; border-radius:20px; box-shadow:0 8px 22px rgba(122,90,248,0.05); overflow:hidden;">'
+      + '<div style="padding:20px 24px 12px;"><h2 style="margin:0; font-size:17px; font-weight:500; letter-spacing:-0.01em;">Hoy</h2></div>'
+      + '<div style="padding:0 24px 22px; display:flex; flex-direction:column; gap:12px;">' + today + '</div></div>'
+      + '</div></div>';
+  }
+
+  function clientsView(v) {
+    var rows = v.clients.map(function (c) {
+      return '<div style="display:grid; grid-template-columns:2fr 1.2fr 1fr 0.8fr 0.9fr 1fr; gap:14px; padding:16px 24px; border-bottom:1px solid #f6f4fc; align-items:center; font-size:14px; font-weight:300; color:#57565f;">'
+        + '<span style="display:flex; align-items:center; gap:11px; min-width:0;">'
+        + '<span style="width:32px; height:32px; flex:none; border-radius:9px; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:600;">' + esc(c.initials) + '</span>'
+        + '<span style="font-weight:400; color:#141319; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc(c.name) + '</span></span>'
+        + '<span>' + esc(c.sector) + '</span>'
+        + '<span>' + esc(c.owner) + '</span>'
+        + '<span style="color:#141319; font-weight:400;">' + esc(c.meetings) + '</span>'
+        + '<span style="color:#141319; font-weight:400;">' + esc(c.leads) + '</span>'
+        + '<span><span style="' + c.pill + '">' + esc(c.status) + '</span></span></div>';
+    }).join("");
+
+    return '<div style="background:#fff; border:1px solid #edeaf7; border-radius:20px; box-shadow:0 8px 22px rgba(122,90,248,0.05); overflow:hidden;">'
+      + '<div style="display:grid; grid-template-columns:2fr 1.2fr 1fr 0.8fr 0.9fr 1fr; gap:14px; padding:15px 24px; border-bottom:1px solid #f1eefa; background:#fbfaff; font-size:12px; font-weight:500; letter-spacing:0.07em; text-transform:uppercase; color:#a8a3b8;">'
+      + '<span>Cliente</span><span>Sector</span><span>Responsable</span><span>Reuniones</span><span>Leads</span><span>Estado</span></div>'
+      + rows + '</div>';
+  }
+
+  function followView(v) {
+    var filters = v.followFilters.map(function (f) {
+      return '<button data-act="filter" data-f="' + esc(f.label) + '" style="' + f.style + '">' + esc(f.label) + '</button>';
+    }).join("");
+
+    var items = v.follows.map(function (f) {
+      return '<div style="background:#fff; border:1px solid #edeaf7; border-radius:16px; padding:17px 20px; display:flex; align-items:center; gap:16px; box-shadow:0 6px 18px rgba(122,90,248,0.05); flex-wrap:wrap;">'
+        + '<span style="width:38px; height:38px; flex:none; border-radius:11px; background:#f4f2ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:15px;">' + esc(f.icon) + '</span>'
+        + '<span style="min-width:190px; flex:1; line-height:1.42;">'
+        + '<span style="display:block; font-size:14.5px; font-weight:400; color:#141319;">' + esc(f.contact) + '</span>'
+        + '<span style="display:block; font-size:13px; font-weight:300; color:#8b8699;">' + esc(f.company) + ' · ' + esc(f.subject) + '</span></span>'
+        + '<span style="font-size:13px; font-weight:300; color:#57565f; white-space:nowrap;">' + esc(f.step) + '</span>'
+        + '<span style="font-size:13px; font-weight:300; color:#57565f; white-space:nowrap;">' + esc(f.due) + '</span>'
+        + '<span style="' + f.pill + '">' + esc(f.state) + '</span>'
+        + '<button class="op-followadv" data-act="advfollow" data-i="' + f.i + '" style="border:1px solid #e7e2f5; background:#fff; color:#5b3ad9; border-radius:10px; padding:9px 15px; font-size:13px; font-weight:400; cursor:pointer; white-space:nowrap;">' + esc(f.action) + '</button></div>';
+    }).join("");
+
+    return '<div><div style="display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap;">' + filters + '</div>'
+      + '<div style="display:flex; flex-direction:column; gap:11px;">' + items + '</div></div>';
+  }
+
+  function tasksView(v) {
+    var cols = v.columns.map(function (col) {
+      var items = col.items.map(function (t) {
+        return '<div style="border:1px solid #f1eefa; border-radius:14px; padding:15px 16px; background:#fcfbff;">'
+          + '<div style="display:flex; align-items:center; gap:8px; margin-bottom:9px;">'
+          + '<span style="' + t.pill + '">' + esc(t.priority) + '</span>'
+          + '<span style="margin-left:auto; font-size:12px; font-weight:300; color:#a8a3b8;">' + esc(t.due) + '</span></div>'
+          + '<div style="font-size:14.5px; font-weight:400; line-height:1.4; color:#141319;">' + esc(t.title) + '</div>'
+          + '<div style="margin-top:8px; font-size:12.5px; font-weight:300; color:#8b8699;">' + esc(t.client) + '</div>'
+          + '<div style="margin-top:13px; display:flex; align-items:center; gap:9px;">'
+          + '<span style="width:26px; height:26px; border-radius:50%; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600;">' + esc(t.who) + '</span>'
+          + '<button class="op-taskadv" data-act="advtask" data-i="' + t.idx + '" style="margin-left:auto; border:1px solid #e7e2f5; background:#fff; color:#5b3ad9; border-radius:9px; padding:7px 13px; font-size:12.5px; font-weight:400; cursor:pointer;">' + esc(t.action) + '</button></div></div>';
+      }).join("");
+
+      return '<div style="background:#fff; border:1px solid #edeaf7; border-radius:20px; padding:18px; box-shadow:0 8px 22px rgba(122,90,248,0.05);">'
+        + '<div style="display:flex; align-items:center; gap:9px; margin-bottom:15px;">'
+        + '<span style="width:9px; height:9px; border-radius:50%; background:' + col.dot + ';"></span>'
+        + '<span style="font-size:14.5px; font-weight:500; color:#141319;">' + esc(col.label) + '</span>'
+        + '<span style="margin-left:auto; font-size:12.5px; font-weight:400; color:#8b8699; background:#f4f2ff; padding:3px 9px; border-radius:99px;">' + esc(col.count) + '</span></div>'
+        + '<div style="display:flex; flex-direction:column; gap:11px;">' + items + '</div></div>';
+    }).join("");
+
+    return '<div class="op-kanban" style="display:grid; grid-template-columns:repeat(3,1fr); gap:18px; align-items:start;">' + cols + '</div>';
+  }
+
+  function content(v) {
+    if (v.isDash) return dashView(v);
+    if (v.isClients) return clientsView(v);
+    if (v.isFollow) return followView(v);
+    if (v.isTasks) return tasksView(v);
+    return "";
+  }
+
+  // ---- render: shell ----------------------------------------------------
+  var built = false;
+  function buildShell() {
+    document.getElementById("app").innerHTML =
+      '<div class="op-shell" style="display:grid; grid-template-columns:246px 1fr; min-height:100vh; background:#f7f6fc;">'
+      + '<aside class="op-side" style="background:#ffffff; border-right:1px solid #edeaf7; display:flex; flex-direction:column; padding:22px 16px; position:sticky; top:0; height:100vh;">'
+      + '<div style="padding:4px 8px 26px;"><img src="assets/logo-onepulso.png" alt="onepulso" style="height:30px; width:auto; display:block;"></div>'
+      + '<div id="op-nav" style="display:flex; flex-direction:column; gap:4px;"></div>'
+      + '<div style="margin-top:auto; border-top:1px solid #f1eefa; padding-top:16px; display:flex; align-items:center; gap:11px;">'
+      + '<span style="width:36px; height:36px; border-radius:50%; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600;">XF</span>'
+      + '<span style="line-height:1.3;">'
+      + '<span style="display:block; font-size:14px; font-weight:500; color:#141319;">Xavier Falco</span>'
+      + '<span style="display:block; font-size:12.5px; font-weight:300; color:#8b8699;">Admin</span></span></div>'
+      + '</aside>'
+      + '<main style="min-width:0;">'
+      + '<header style="position:sticky; top:0; z-index:20; background:rgba(255,255,255,0.9); backdrop-filter:blur(10px); border-bottom:1px solid #edeaf7; padding:18px 34px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">'
+      + '<div style="min-width:0;">'
+      + '<h1 id="op-title" style="margin:0; font-size:22px; font-weight:400; letter-spacing:-0.02em;"></h1>'
+      + '<p id="op-subtitle" style="margin:3px 0 0; font-size:13.5px; font-weight:300; color:#8b8699;"></p></div>'
+      + '<div style="margin-left:auto; display:flex; align-items:center; gap:12px;">'
+      + '<div style="position:relative; display:flex; align-items:center;">'
+      + '<span style="position:absolute; left:13px; font-size:13px; color:#a8a3b8;">⌕</span>'
+      + '<input id="op-search" class="op-search" placeholder="Buscar…" style="width:220px; padding:10px 14px 10px 30px; border:1px solid #e7e2f5; border-radius:11px; background:#fff; font-size:14px; font-weight:300; color:#141319; outline:none;"></div>'
+      + '<button class="op-new" data-act="new" style="display:inline-flex; align-items:center; gap:8px; background:#7a5af8; color:#fff; border:none; padding:11px 18px; border-radius:11px; font-size:14px; font-weight:400; cursor:pointer; box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nuevo</button>'
+      + '</div></header>'
+      + '<div id="op-content" style="padding:30px 34px 56px;"></div>'
+      + '</main></div>'
+      + '<div id="op-toast"></div>';
+
+    // search input keeps focus across content re-renders
+    var search = document.getElementById("op-search");
+    search.addEventListener("input", function (e) {
+      state.query = e.target.value;
+      renderContentOnly();
+    });
+
+    // event delegation for all clicks
+    document.getElementById("app").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-act]");
+      if (!btn) return;
+      var act = btn.getAttribute("data-act");
+      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; render(); }
+      else if (act === "new") { flash("Formulario de alta — pendiente de conectar"); }
+      else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
+      else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
+      else if (act === "advtask") { advanceTask(parseInt(btn.getAttribute("data-i"), 10)); }
+    });
+
+    built = true;
+  }
+
+  function renderNav(v) {
+    document.getElementById("op-nav").innerHTML = v.nav.map(function (n) {
+      return '<button class="op-nav" data-act="nav" data-id="' + n.id + '" style="' + n.style + '">'
+        + '<span style="width:20px; display:inline-flex; justify-content:center;">' + esc(n.icon) + '</span>'
+        + esc(n.label)
+        + '<span style="' + n.badgeStyle + '">' + esc(n.count) + '</span></button>';
+    }).join("");
+  }
+
+  function renderContentOnly() {
+    var v = vals();
+    document.getElementById("op-content").innerHTML = content(v);
+  }
+
+  function renderToast() {
+    document.getElementById("op-toast").innerHTML = state.toast
+      ? '<div style="position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:80; background:#141319; color:#fff; padding:13px 22px; border-radius:13px; font-size:14px; font-weight:300; box-shadow:0 18px 44px rgba(20,19,25,0.3);">' + esc(state.toast) + '</div>'
+      : "";
+  }
+
+  function render() {
+    if (!built) buildShell();
+    var v = vals();
+    renderNav(v);
+    document.getElementById("op-title").textContent = v.title;
+    document.getElementById("op-subtitle").textContent = v.subtitle;
+    var search = document.getElementById("op-search");
+    if (search.value !== state.query) search.value = state.query;
+    document.getElementById("op-content").innerHTML = content(v);
+    renderToast();
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
