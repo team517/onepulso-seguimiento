@@ -101,6 +101,9 @@
     franjaOpen: false,
     franjaDraft: null,
     breaks: [],
+    avail: null,
+    availOpen: false,
+    availDraft: null,
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -131,6 +134,8 @@
   };
 
   // El horario empieza vacío: tú pones las horas (arrastrando o escribiendo en el calendario).
+  state.avail = defaultAvail();
+  computeHours();
 
   var toastTimer = null;
   function flash(msg) {
@@ -176,6 +181,20 @@
     var r = col.getBoundingClientRect();
     var h = state.horFrom + Math.floor((clientY - r.top) / HOR_ROWH);
     return Math.max(state.horFrom, Math.min(state.horTo - 1, h));
+  }
+  function defaultAvail() {
+    var a = [];
+    for (var i = 0; i < 7; i++) {
+      if (i <= 4) a.push({ enabled: true, color: COLOR_ORDER[i % COLOR_ORDER.length], ranges: [{ from: 10, to: 13 }, { from: 15, to: 19 }] });
+      else a.push({ enabled: false, color: COLOR_ORDER[i % COLOR_ORDER.length], ranges: [] });
+    }
+    return a;
+  }
+  function computeHours() {
+    var mn = 24, mx = 0, any = false;
+    (state.avail || []).forEach(function (a) { if (a.enabled) a.ranges.forEach(function (r) { if (r.to > r.from) { any = true; if (r.from < mn) mn = r.from; if (r.to > mx) mx = r.to; } }); });
+    if (!any) { state.horFrom = 8; state.horTo = 20; }
+    else { state.horFrom = mn; state.horTo = (mx <= mn ? mn + 1 : mx); }
   }
   function quickAddCreate() {
     var qa = state.quickAdd; if (!qa) return;
@@ -458,6 +477,15 @@
     var cols = "";
     for (var d = 0; d < 7; d++) {
       var dt2 = ws + d * DAY, isT2 = dayStartP(dt2) === todayD;
+      var av = state.avail ? state.avail[d] : null;
+      var availBg = "";
+      if (av && av.enabled && av.ranges.length) {
+        var cc2 = COLORS[av.color || "violet"];
+        availBg = av.ranges.map(function (r) {
+          var rt = (Math.max(first, r.from) - first) * rowH, rh = (Math.min(last, r.to) - Math.max(first, r.from)) * rowH;
+          return rh > 0 ? '<div style="position:absolute;left:0;right:0;top:' + rt + 'px;height:' + rh + 'px;background:' + cc2[0] + ';"></div>' : "";
+        }).join("");
+      }
       var breaksHtml = perDayBreaks[d].map(function (b) {
         var bdur = b.durH || 1, bsd = new Date(b.start), bsh = bsd.getHours(), btop = (bsh - first) * rowH, bH = Math.max(22, bdur * rowH - 4);
         return '<div class="hor-brk hor-bdrag" draggable="true" data-bi="' + b.id + '" style="position:absolute;left:3px;right:3px;top:' + btop + 'px;height:' + bH + 'px;border-radius:8px;padding:3px 6px;overflow:hidden;background:repeating-linear-gradient(45deg,#eeecf3,#eeecf3 6px,#e5e2ee 6px,#e5e2ee 12px);border:1px solid #ddd8e8;">'
@@ -491,7 +519,7 @@
           + (hgt > 52 ? '<div style="font-size:10.5px;font-weight:300;color:#8b8699;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(t.client) + '</div>' : '')
           + '</div>';
       }).join("");
-      cols += '<div class="hor-daycol" data-day="' + dt2 + '" style="position:relative;height:' + totalH + 'px;border-left:1px solid #f1eefa;background-color:' + (isT2 ? "#fbfaff" : "#fff") + ';background-image:repeating-linear-gradient(to bottom,#f4f2fb 0,#f4f2fb 1px,transparent 1px,transparent ' + rowH + 'px);">' + breaksHtml + nowLine + blocks + '</div>';
+      cols += '<div class="hor-daycol" data-day="' + dt2 + '" style="position:relative;height:' + totalH + 'px;border-left:1px solid #f1eefa;background-color:#f6f4fa;background-image:repeating-linear-gradient(to bottom,#eeecf5 0,#eeecf5 1px,transparent 1px,transparent ' + rowH + 'px);">' + availBg + breaksHtml + nowLine + blocks + '</div>';
     }
 
     // panel «sin horario»
@@ -540,11 +568,12 @@
       + '<button data-act="hor-franja-cancel" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;padding:8px 14px;font-size:13px;cursor:pointer;">Cancelar</button>'
       + '<button data-act="hor-franja-save" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 18px;font-size:13px;cursor:pointer;box-shadow:0 8px 20px rgba(122,90,248,0.28);">Guardar</button>'
       + '</div></div>' : '';
-    var franja = '<div style="position:relative;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
-      + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Franja horaria</span>'
-      + '<button data-act="hor-franja-open" style="display:inline-flex;align-items:center;gap:9px;border:1px solid ' + (state.franjaOpen ? "#7a5af8" : "#e7e2f5") + ';background:' + (state.franjaOpen ? "#f4f2ff" : "#fff") + ';color:#141319;border-radius:10px;padding:8px 14px;font-size:13.5px;font-weight:500;cursor:pointer;">🕐 ' + p2(first) + ':00 – ' + p2(last) + ':00 <span style="color:#a8a3b8;">▾</span></button>'
+    var activeDays = (state.avail || []).filter(function (a) { return a.enabled && a.ranges.length; }).length;
+    var franja = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
+      + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Horario semanal</span>'
+      + '<button data-act="av-open" style="display:inline-flex;align-items:center;gap:8px;border:1px solid #7a5af8;background:#f4f2ff;color:#5b3ad9;border-radius:10px;padding:8px 14px;font-size:13.5px;font-weight:500;cursor:pointer;">🗓 Organizar horario</button>'
+      + '<span style="font-size:11.5px;color:#8b8699;">' + p2(first) + ':00 – ' + p2(last) + ':00 · ' + activeDays + ' días activos</span>'
       + '<span style="margin-left:auto;font-size:11.5px;color:#8b8699;">' + (last - first) + ' horas visibles</span>'
-      + pop
       + '</div>';
 
     // mini-formulario para escribir una tarea nueva
@@ -576,6 +605,44 @@
         + '</div></div>';
     }
 
+    // editor de horario semanal (tipo Calendly)
+    var avm = "";
+    if (state.availOpen) {
+      var dr = state.availDraft || state.avail || [];
+      var initials = ["L", "M", "X", "J", "V", "S", "D"], dnames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+      function tsel(id, val) { var o = ""; for (var hh = 0; hh <= 24; hh++) o += '<option value="' + hh + '"' + (hh === val ? " selected" : "") + '>' + p2(hh) + ':00</option>'; return '<select id="' + id + '" style="padding:8px 9px;border:1px solid #e7e2f5;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;outline:none;">' + o + '</select>'; }
+      var addBtn = function (i) { return '<button data-act="av-add-range" data-d="' + i + '" title="Añadir franja" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:15px;flex:none;">＋</button>'; };
+      var rows = dr.map(function (a, i) {
+        var cc = COLORS[a.color || "violet"], right;
+        if (a.enabled && a.ranges.length) {
+          right = a.ranges.map(function (r, ri) {
+            return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">'
+              + tsel("av-" + i + "-" + ri + "-from", r.from) + '<span style="color:#a8a3b8;">–</span>' + tsel("av-" + i + "-" + ri + "-to", r.to)
+              + '<button data-act="av-del-range" data-d="' + i + '" data-r="' + ri + '" title="Quitar" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:15px;padding:0 4px;">✕</button>'
+              + (ri === 0 ? addBtn(i) : '') + '</div>';
+          }).join("");
+        } else {
+          right = '<div style="display:flex;align-items:center;gap:10px;"><span style="font-size:13px;color:#a8a3b8;">No disponible</span>' + addBtn(i) + '</div>';
+        }
+        return '<div style="display:flex;gap:12px;padding:13px 0;border-top:1px solid #f4f2fb;align-items:flex-start;">'
+          + '<div style="display:flex;align-items:center;gap:9px;width:132px;flex:none;padding-top:3px;">'
+          + '<button data-act="av-color" data-d="' + i + '" title="Cambiar color" style="width:26px;height:26px;border-radius:50%;background:' + cc[1] + ';border:none;cursor:pointer;color:#fff;font-size:11px;font-weight:700;">' + initials[i] + '</button>'
+          + '<span style="font-size:13px;font-weight:500;">' + dnames[i] + '</span></div>'
+          + '<div style="flex:1;min-width:0;">' + right + '</div></div>';
+      }).join("");
+      avm = '<div data-act="av-cancel" style="position:fixed;inset:0;z-index:110;background:rgba(20,19,25,0.34);display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto;">'
+        + '<div style="width:100%;max-width:540px;background:#fff;border-radius:18px;box-shadow:0 30px 70px rgba(20,19,25,0.28);overflow:hidden;">'
+        + '<div style="padding:18px 22px 6px;display:flex;align-items:flex-start;gap:12px;">'
+        + '<div style="flex:1;"><div style="font-size:16px;font-weight:500;">⇄ Horario semanal</div>'
+        + '<div style="font-size:12.5px;font-weight:300;color:#8b8699;margin-top:2px;">Define cuándo estás disponible y su color</div></div>'
+        + '<button data-act="av-cancel" title="Cerrar" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:18px;">✕</button></div>'
+        + '<div style="padding:6px 22px 10px;max-height:56vh;overflow:auto;">' + rows + '</div>'
+        + '<div style="padding:14px 22px;border-top:1px solid #f1eefa;display:flex;gap:10px;justify-content:flex-end;background:#fbfaff;">'
+        + '<button data-act="av-cancel" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:10px;padding:9px 16px;font-size:13.5px;cursor:pointer;">Cancelar</button>'
+        + '<button data-act="av-save" style="border:none;background:#7a5af8;color:#fff;border-radius:10px;padding:9px 20px;font-size:13.5px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">Guardar cambios</button></div>'
+        + '</div></div>';
+    }
+
     return toolbar + franja
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
       + panel
@@ -583,7 +650,7 @@
       + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);border-bottom:1px solid #f1eefa;background:#fbfaff;">' + header + '</div>'
       + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);">' + gutter + cols + '</div>'
       + '</div></div></div></div>'
-      + qaHtml;
+      + qaHtml + avm;
   }
 
   function content(v) {
@@ -643,7 +710,7 @@
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
-      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; state.franjaOpen = false; state.franjaDraft = null; render(); }
+      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; state.franjaOpen = false; state.franjaDraft = null; state.availOpen = false; state.availDraft = null; render(); }
       else if (act === "new") { flash("Formulario de alta — pendiente de conectar"); }
       else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
       else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
@@ -657,6 +724,12 @@
       else if (act === "hor-color") { var ck = parseInt(btn.getAttribute("data-i"), 10); var tc = state.tasks[ck]; tc.color = COLOR_ORDER[(COLOR_ORDER.indexOf(taskColorKey(tc, ck)) + 1) % COLOR_ORDER.length]; render(); }
       else if (act === "hor-brk-del") { var bid = btn.getAttribute("data-id"); state.breaks = state.breaks.filter(function (x) { return x.id !== bid; }); render(); flash("Descanso eliminado"); }
       else if (act === "hor-bdur") { var bd = state.breaks.filter(function (x) { return x.id === btn.getAttribute("data-id"); })[0]; if (bd) { bd.durH = Math.max(1, Math.min(6, (bd.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); } }
+      else if (act === "av-open") { state.availOpen = true; state.availDraft = JSON.parse(JSON.stringify(state.avail || defaultAvail())); state.quickAdd = null; render(); }
+      else if (act === "av-cancel") { if (e.target === btn) { state.availOpen = false; state.availDraft = null; render(); } }
+      else if (act === "av-add-range") { var ad = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ad.enabled = true; if (ad.ranges.length) { var lr = ad.ranges[ad.ranges.length - 1]; var nf = Math.min(23, lr.to); ad.ranges.push({ from: nf, to: Math.min(24, nf + 2) }); } else { ad.ranges.push({ from: 9, to: 17 }); } render(); }
+      else if (act === "av-del-range") { var ad2 = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ad2.ranges.splice(parseInt(btn.getAttribute("data-r"), 10), 1); if (!ad2.ranges.length) ad2.enabled = false; render(); }
+      else if (act === "av-color") { var ac = state.availDraft[parseInt(btn.getAttribute("data-d"), 10)]; ac.color = COLOR_ORDER[(COLOR_ORDER.indexOf(ac.color || "violet") + 1) % COLOR_ORDER.length]; render(); }
+      else if (act === "av-save") { (state.availDraft || []).forEach(function (a) { a.ranges = a.ranges.filter(function (r) { return r.to > r.from; }); if (!a.ranges.length) a.enabled = false; }); state.avail = state.availDraft; state.availDraft = null; state.availOpen = false; computeHours(); render(); flash("Horario semanal guardado"); }
       else if (act === "qa-cancel") { state.quickAdd = null; render(); }
       else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
@@ -723,9 +796,11 @@
 
     // Selector de franja horaria (tipo Calendly)
     appEl.addEventListener("change", function (e) {
-      if (!state.franjaDraft) return;
-      if (e.target.id === "op-franja-from") state.franjaDraft.from = parseInt(e.target.value, 10);
-      else if (e.target.id === "op-franja-to") state.franjaDraft.to = parseInt(e.target.value, 10);
+      var id = e.target.id || "";
+      if (state.availDraft && id.indexOf("av-") === 0) {
+        var pp = id.split("-"), dd = parseInt(pp[1], 10), rr = parseInt(pp[2], 10), wh = pp[3];
+        if (state.availDraft[dd] && state.availDraft[dd].ranges[rr]) state.availDraft[dd].ranges[rr][wh] = parseInt(e.target.value, 10);
+      }
     });
 
     // Mini-formulario de tarea (escribir)
