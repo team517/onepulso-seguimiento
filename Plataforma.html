@@ -90,6 +90,7 @@
     followFilter: "Todos",
     toast: "",
     weekStart: mondayOf(Date.now()),
+    quickAdd: null,
     clients: [
       { name: "Vitalis Health", sector: "Salud digital", owner: "Xavier F.", meetings: 24, leads: 412, status: "Activo" },
       { name: "Bloom Studio", sector: "Audiovisual", owner: "Marta R.", meetings: 17, leads: 268, status: "Activo" },
@@ -119,14 +120,7 @@
     ]
   };
 
-  // Pre-programa algunas tareas en el horario de esta semana (mismo objeto que en «Tareas»)
-  (function () {
-    var mon = state.weekStart;
-    state.tasks[3].start = mon + 1 * DAY + 9 * HOUR;  state.tasks[3].durH = 1;  // Revisar reputación — Mar 09:00
-    state.tasks[1].start = mon + 1 * DAY + 11 * HOUR; state.tasks[1].durH = 2;  // Secuencia A/B — Mar 11:00
-    state.tasks[4].start = mon + 2 * DAY + 16 * HOUR; state.tasks[4].durH = 1;  // Informe mensual — Mié 16:00
-    state.tasks[2].start = mon + 3 * DAY + 10 * HOUR; state.tasks[2].durH = 1;  // Calentar buzones — Jue 10:00
-  })();
+  // El horario empieza vacío: tú pones las horas (arrastrando o escribiendo en el calendario).
 
   var toastTimer = null;
   function flash(msg) {
@@ -172,6 +166,17 @@
     var r = col.getBoundingClientRect();
     var h = HOR_FIRST + Math.floor((clientY - r.top) / HOR_ROWH);
     return Math.max(HOR_FIRST, Math.min(HOR_LAST - 1, h));
+  }
+  function quickAddCreate() {
+    var qa = state.quickAdd; if (!qa) return;
+    var el = document.getElementById("op-qa-input"); if (el) qa.text = el.value;
+    var title = (qa.text || "").trim();
+    if (!title) { flash("Escribe un nombre para la tarea"); return; }
+    var extra = { title: title, client: "—", who: "XF", priority: qa.prio || "Media" };
+    if (qa.day != null) { extra.start = qa.day + qa.hour * HOUR; extra.durH = 1; }
+    newTask(extra);
+    state.quickAdd = null; render();
+    flash(qa.day != null ? ("Añadida «" + title + "» · " + (qa.hour < 10 ? "0" : "") + qa.hour + ":00") : ("Añadida «" + title + "» — arrástrala al horario"));
   }
 
   // ---- derived view model (mirrors renderVals) --------------------------
@@ -476,13 +481,36 @@
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;">' + (state.tasks.length - uns.length) + ' con horario · ' + uns.length + ' sin horario</span>'
       + '<button data-act="hor-new" style="background:#7a5af8;color:#fff;border:none;border-radius:11px;padding:10px 16px;font-size:13px;cursor:pointer;box-shadow:0 10px 24px rgba(122,90,248,0.3);">+ Nueva tarea</button></div></div>';
 
+    // mini-formulario para escribir una tarea nueva
+    var qa = state.quickAdd, qaHtml = "";
+    if (qa) {
+      var qLeft = Math.max(8, Math.min(qa.x, window.innerWidth - 266));
+      var qTop = Math.max(8, Math.min(qa.y, window.innerHeight - 190));
+      var qLabel;
+      if (qa.day != null) { var qd = new Date(qa.day); qLabel = dayNames[(qd.getDay() + 6) % 7] + " " + qd.getDate() + " · " + p2(qa.hour) + ":00"; }
+      else { qLabel = "Nueva tarea · sin horario"; }
+      var prios = [["Alta", "#b0234c"], ["Media", "#5b3ad9"], ["Baja", "#1a9d54"]].map(function (p) {
+        var on = (qa.prio || "Media") === p[0];
+        return '<button data-act="qa-prio" data-p="' + p[0] + '" title="' + p[0] + '" style="width:16px;height:16px;border-radius:50%;border:2px solid ' + (on ? p[1] : "#e0dcec") + ';background:' + (on ? p[1] : "#fff") + ';cursor:pointer;padding:0;"></button>';
+      }).join("");
+      qaHtml = '<div id="op-qa" style="position:fixed;left:' + qLeft + 'px;top:' + qTop + 'px;z-index:70;width:250px;background:#fff;border:1px solid #e3ddf7;border-radius:13px;box-shadow:0 18px 44px rgba(20,19,25,0.2);padding:13px;">'
+        + '<div style="font-size:11.5px;font-weight:500;color:#8b8699;margin-bottom:8px;">' + esc(qLabel) + '</div>'
+        + '<input id="op-qa-input" class="op-search" value="' + esc(qa.text) + '" placeholder="Escribe la tarea…" style="width:100%;padding:9px 11px;border:1px solid #e7e2f5;border-radius:9px;font-size:13.5px;font-weight:300;outline:none;margin-bottom:10px;">'
+        + '<div style="display:flex;align-items:center;gap:7px;">'
+        + '<span style="display:flex;gap:5px;align-items:center;">' + prios + '</span>'
+        + '<button data-act="qa-cancel" style="margin-left:auto;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:8px;padding:7px 11px;font-size:12.5px;cursor:pointer;">Cancelar</button>'
+        + '<button data-act="qa-add" style="border:none;background:#7a5af8;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">Añadir</button>'
+        + '</div></div>';
+    }
+
     return toolbar
       + '<div class="hor-grid" style="display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;">'
       + panel
       + '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 10px 30px rgba(122,90,248,0.05);overflow:hidden;"><div class="op-scroll" style="overflow-x:auto;"><div style="min-width:720px;">'
       + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);border-bottom:1px solid #f1eefa;background:#fbfaff;">' + header + '</div>'
       + '<div style="display:grid;grid-template-columns:54px repeat(7,1fr);">' + gutter + cols + '</div>'
-      + '</div></div></div></div>';
+      + '</div></div></div></div>'
+      + qaHtml;
   }
 
   function content(v) {
@@ -532,26 +560,28 @@
 
     // event delegation for all clicks
     document.getElementById("app").addEventListener("click", function (e) {
-      // Horario: click en un hueco vacío del día -> crear un bloque a esa hora
+      // Horario: click en un hueco vacío del día -> abrir mini-formulario para escribir la tarea
       var col0 = e.target.closest(".hor-daycol");
-      if (col0 && !e.target.closest(".hor-block") && !e.target.closest("[data-act]")) {
+      if (col0 && !e.target.closest(".hor-block") && !e.target.closest("#op-qa") && !e.target.closest("[data-act]")) {
         var hr0 = horHourFromY(col0, e.clientY);
-        newTask({ start: parseInt(col0.getAttribute("data-day"), 10) + hr0 * HOUR, durH: 1 });
-        render(); flash("Bloque creado a las " + (hr0 < 10 ? "0" : "") + hr0 + ":00");
-        return;
+        state.quickAdd = { day: parseInt(col0.getAttribute("data-day"), 10), hour: hr0, x: e.clientX, y: e.clientY, text: "", prio: "Media" };
+        render(); return;
       }
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
-      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; render(); }
+      if (act === "nav") { state.view = btn.getAttribute("data-id"); state.query = ""; state.quickAdd = null; render(); }
       else if (act === "new") { flash("Formulario de alta — pendiente de conectar"); }
       else if (act === "filter") { state.followFilter = btn.getAttribute("data-f"); render(); }
       else if (act === "advfollow") { advanceFollow(parseInt(btn.getAttribute("data-i"), 10)); }
       else if (act === "advtask") { advanceTask(parseInt(btn.getAttribute("data-i"), 10)); }
-      else if (act === "hor-prev") { state.weekStart -= 7 * DAY; render(); }
-      else if (act === "hor-next") { state.weekStart += 7 * DAY; render(); }
-      else if (act === "hor-today") { state.weekStart = mondayOf(Date.now()); render(); }
-      else if (act === "hor-new") { newTask(); render(); flash("Tarea creada — arrástrala al horario"); }
+      else if (act === "hor-prev") { state.quickAdd = null; state.weekStart -= 7 * DAY; render(); }
+      else if (act === "hor-next") { state.quickAdd = null; state.weekStart += 7 * DAY; render(); }
+      else if (act === "hor-today") { state.quickAdd = null; state.weekStart = mondayOf(Date.now()); render(); }
+      else if (act === "hor-new") { state.quickAdd = { day: null, hour: null, x: Math.max(8, (window.innerWidth / 2) - 125), y: 150, text: "", prio: "Media" }; render(); }
+      else if (act === "qa-prio") { if (state.quickAdd) { state.quickAdd.prio = btn.getAttribute("data-p"); render(); } }
+      else if (act === "qa-cancel") { state.quickAdd = null; render(); }
+      else if (act === "qa-add") { quickAddCreate(); }
       else if (act === "hor-unsched-btn") { state.tasks[parseInt(btn.getAttribute("data-i"), 10)].start = null; render(); flash("Quitada del horario"); }
       else if (act === "hor-dur") { var dk = state.tasks[parseInt(btn.getAttribute("data-i"), 10)]; dk.durH = Math.max(1, Math.min(6, (dk.durH || 1) + parseInt(btn.getAttribute("data-d"), 10))); render(); }
     });
@@ -594,6 +624,16 @@
       if (zone) { e.preventDefault(); state.tasks[hdrag].start = null; hdrag = null; render(); flash("Quitada del horario"); }
     });
 
+    // Mini-formulario de tarea (escribir)
+    appEl.addEventListener("input", function (e) {
+      if (e.target.id === "op-qa-input" && state.quickAdd) state.quickAdd.text = e.target.value;
+    });
+    appEl.addEventListener("keydown", function (e) {
+      if (e.target.id !== "op-qa-input") return;
+      if (e.key === "Enter") { e.preventDefault(); quickAddCreate(); }
+      else if (e.key === "Escape") { e.preventDefault(); state.quickAdd = null; render(); }
+    });
+
     built = true;
   }
 
@@ -626,6 +666,7 @@
     var search = document.getElementById("op-search");
     if (search.value !== state.query) search.value = state.query;
     document.getElementById("op-content").innerHTML = content(v);
+    if (state.quickAdd) { var qi = document.getElementById("op-qa-input"); if (qi) { qi.focus(); var vv = qi.value; qi.value = ""; qi.value = vv; } }
     var tools = document.getElementById("op-headtools");
     if (tools) tools.style.display = (v.isSeg || v.isHorario) ? "none" : "flex";
     if (v.isSeg) { if (window.OPSEG) OPSEG.mount(document.getElementById("op-seg-mount")); }
