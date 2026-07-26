@@ -1523,7 +1523,7 @@ window.OPSEG = (function () {
     var transcript=t.messages.map(function(mm){
       var out=mm.direction==="outbound";
       var who=out?"Tú":(((mm.from||"").replace(/<[^>]*>/,"").replace(/["]/g,"").trim())||mm.from_addr||firstName(t.contact_name));
-      return '<div style="display:flex;'+(out?"justify-content:flex-end;":"")+'"><div style="max-width:74%;background:'+(out?"#f2effc":"#fff")+';border:1px solid '+(out?"#e3ddf7":"#edeaf7")+';border-radius:'+(out?"14px 14px 4px 14px":"14px 14px 14px 4px")+';padding:12px 15px;box-shadow:0 2px 8px rgba(20,19,25,0.04);">'
+      return '<div style="display:flex;width:100%;'+(out?"justify-content:flex-end;":"")+'"><div style="max-width:78%;min-width:0;background:'+(out?"#f2effc":"#fff")+';border:1px solid '+(out?"#e3ddf7":"#edeaf7")+';border-radius:'+(out?"14px 14px 4px 14px":"14px 14px 14px 4px")+';padding:12px 15px;box-shadow:0 2px 8px rgba(20,19,25,0.04);">'
         + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;"><span style="font-size:12px;font-weight:600;color:'+(out?"#5b3ad9":"#141319")+';">'+esc(who)+'</span>'
         + (mm._followup?'<span style="font-size:9.5px;color:#5b3ad9;background:#ece7ff;padding:1px 6px;border-radius:99px;">follow-up</span>':'')
         + (mm.attachments&&mm.attachments.length?'<span style="font-size:10.5px;color:#8b8699;">📎 '+mm.attachments.length+'</span>':'')
@@ -1533,7 +1533,7 @@ window.OPSEG = (function () {
               + (sp.quoted?('<button data-sa="toggle-quote" data-id="'+mm.id+'" style="margin-top:6px;border:1px solid #e7e2f5;background:#f7f6fc;color:#8b8699;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;">'+(qo?"▲ Ocultar historial citado":"▼ Mostrar historial citado")+'</button>'+(qo?'<div style="font-size:12.5px;font-weight:300;color:#a8a3b8;line-height:1.55;margin-top:8px;border-left:2px solid #e3ddf7;padding-left:10px;word-break:break-word;">'+sp.quoted+'</div>':'')):'');
           })()
         + '</div></div>';
-    }).join('<div style="height:12px;"></div>');
+    }).join('');
     var fus=t.followups.filter(function(f){return f.status==="scheduled";}).sort(function(a,b){return a.scheduled_at-b.scheduled_at;});
     var fuList=fus.length?'<div style="display:flex;flex-direction:column;gap:7px;">'+fus.map(function(f){
       return '<div style="display:flex;align-items:center;gap:9px;border:1px solid #f1eefa;border-radius:10px;padding:8px 10px;background:#fcfbff;">'
@@ -1569,9 +1569,9 @@ window.OPSEG = (function () {
       + '<div style="min-width:0;flex:1;"><div style="font-size:17px;font-weight:500;">'+esc(t.contact_name)+'</div><div style="font-size:12.5px;font-weight:300;color:#8b8699;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+((t.participants&&t.participants.length)?("Con: "+t.participants.map(esc).join(", ")):esc(t.email))+'</div></div>'
       + '<button class="seg-ghost" data-sa="del-thread" data-id="'+t.id+'" title="Eliminar del seguimiento" style="border:1px solid #e7e2f5;background:#fff;color:#b0234c;border-radius:9px;padding:8px 12px;cursor:pointer;font-size:12.5px;">🗑 Eliminar</button>'
       + '<button class="seg-ghost" data-sa="drawer-close" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:15px;">✕</button></div>'
-      + '<div class="seg-scroll" style="flex:1;min-height:0;padding:22px 26px;overflow:auto;">'
-      + '<div style="max-width:820px;margin:0 auto;">'
-      + '<div style="display:flex;flex-direction:column;">'+transcript+'</div>'
+      + '<div class="seg-scroll" style="flex:1;min-height:0;min-width:0;padding:22px 26px;overflow-y:auto;overflow-x:hidden;">'
+      + '<div style="max-width:820px;width:100%;margin:0 auto;">'
+      + '<div style="display:flex;flex-direction:column;width:100%;gap:12px;">'+transcript+'</div>'
       + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:16px;">'
       + '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">Responder</div>'
       + '<div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8b8699;margin-bottom:6px;">Pista para la IA (opcional)</div>'
