@@ -1171,9 +1171,11 @@ window.OPSEG = (function () {
   ];
 
   var state={
-    account:null, connectEmail:"",
-    threads:[], openThread:null,
+    account:null,
+    cEmail:"", cPass:"", cImapHost:"", cImapPort:"993", cSmtpHost:"", cSmtpPort:"465", connecting:false, connError:"",
+    threads:[], openThread:null, importing:false, sending:false,
     importOpen:false, importQuery:"",
+    attachments:[], linkUrl:"",
     calMonth:(function(){ var d=new Date(); return {y:d.getFullYear(),m:d.getMonth()}; })(),
     draftReply:"", replyTone:"normal",
     draftFollow:"", schedInput:"",
@@ -1181,6 +1183,10 @@ window.OPSEG = (function () {
   };
   var drag={fu:null};
   var mountEl=null, active=false, listeners=false, containers=false;
+  var emailToken="";
+  try{ emailToken=localStorage.getItem("op_email_token")||""; var _em=localStorage.getItem("op_email_addr"); if(emailToken&&_em) state.account={email:_em}; }catch(e){}
+  function apiFetch(u,o){ o=o||{}; o.headers=o.headers||{}; if(emailToken) o.headers.Authorization="Bearer "+emailToken; return fetch(u,o); }
+  function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); }catch(e){} state.account=null; render(); flash("Sesión de correo caducada · vuelve a conectar"); }
 
   function threadById(id){ return state.threads.filter(function(t){return t.id===id;})[0]; }
   function lastMsg(t){ return t.messages.length?t.messages[t.messages.length-1]:null; }
@@ -1188,25 +1194,44 @@ window.OPSEG = (function () {
   function activeFus(){ return allFollowups().filter(function(o){ return o.f.status==="scheduled"; }); }
 
   function importConversation(email){
-    email=String(email).trim().toLowerCase();
+    email=String(email).trim();
     if(!email){ flash("Escribe el email de la persona"); return; }
-    var exists=state.threads.filter(function(t){return t.email.toLowerCase()===email;})[0];
-    if(exists){ state.openThread=exists.id; state.importOpen=false; render(); flash("Conversación ya importada"); return; }
-    var d=DIRECTORY.filter(function(x){return x.email.toLowerCase()===email;})[0];
-    var name,company,msgs;
-    if(d){ name=d.name; company=d.company; msgs=d.msgs.map(function(x){return Object.assign({},x);}); }
-    else { name=prettyName(email); company=(email.split("@")[1]||"").split(".")[0].replace(/\b\w/,function(c){return c.toUpperCase();}); msgs=[ m("outbound","Hola "+firstName(name)+", te escribo para retomar nuestra conversación. ¿Lo comentamos?",-3*DAY) ]; }
-    var t={ id:uid("t"), email:email, contact_name:name, company:company, subject:"Conversación con "+name, status:"active", messages:msgs, followups:[] };
-    state.threads.push(t);
-    state.openThread=t.id; state.importOpen=false; state.importQuery="";
-    render(); flash("Importada la conversación con "+name+" ("+msgs.length+" mensajes)");
+    var exists=state.threads.filter(function(t){return t.email.toLowerCase()===email.toLowerCase();})[0];
+    if(exists){ state.openThread=exists.id; state.importOpen=false; render(); flash("Ya estaba importada"); return; }
+    state.importing=true; render();
+    apiFetch("/api/email/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactEmail:email})})
+      .then(function(r){ if(r.status===401){ handle401(); throw new Error("401"); } return r.json(); })
+      .then(function(j){
+        state.importing=false;
+        if(j.error){ flash("Error al importar: "+(j.detail||j.error)); render(); return; }
+        var msgs=(j.messages||[]).map(function(mm){ return { id:mm.id||uid("m"), direction:mm.direction, from:mm.from, to:mm.to, subject:mm.subject, body_html:mm.body_html, body_text:mm.body_text, date:mm.date, message_id:mm.message_id, in_reply_to:mm.in_reply_to, references:mm.references||[], attachments:mm.attachments||[] }; });
+        var name=prettyName(email);
+        var t={ id:uid("t"), email:email, contact_name:name, company:(email.split("@")[1]||""), subject:(msgs[msgs.length-1]&&msgs[msgs.length-1].subject)||("Conversación con "+name), status:"active", messages:msgs, followups:[] };
+        state.threads.push(t); state.openThread=t.id; state.importOpen=false; state.importQuery="";
+        render(); flash(msgs.length?("Importados "+msgs.length+" mensajes con "+name):("Sin mensajes previos con "+email));
+      }, function(e){ state.importing=false; if(String(e.message)!=="401"){ flash("Error de red al importar"); render(); } });
   }
   function sendReply(){
     var t=threadById(state.openThread); if(!t) return;
-    var body=state.draftReply.trim(); if(!body){ flash("Escribe o genera una respuesta"); return; }
+    var body=(state.draftReply||"").trim();
+    if(!body && !(state.attachments&&state.attachments.length)){ flash("Escribe una respuesta o adjunta algo"); return; }
     var html=textToHtml(body);
-    t.messages.push({ id:uid("m"), direction:"outbound", body_html:html, body_text:stripHtml(html), date:Date.now(), message_id:uid("mid") });
-    state.draftReply=""; render(); flash("Respuesta enviada a "+firstName(t.contact_name));
+    var lm=lastMsg(t), to=t.email;
+    var subj=(lm&&lm.subject)?("Re: "+lm.subject.replace(/^\s*re:\s*/i,"")):("Re: "+(t.subject||""));
+    var fd=new FormData();
+    fd.append("to",to); fd.append("subject",subj); fd.append("html",html); fd.append("text",body);
+    if(lm){ if(lm.message_id) fd.append("inReplyTo",lm.message_id); var refs=(lm.references||[]).concat(lm.message_id?[lm.message_id]:[]); if(refs.length) fd.append("references",refs.join(" ")); }
+    (state.attachments||[]).forEach(function(f){ fd.append("attachments",f,f.name); });
+    state.sending=true; render();
+    apiFetch("/api/email/send",{method:"POST",body:fd})
+      .then(function(r){ if(r.status===401){ handle401(); throw new Error("401"); } return r.json(); })
+      .then(function(j){
+        state.sending=false;
+        if(j.error){ flash("No se envió: "+(j.detail||j.error)); render(); return; }
+        t.messages.push({ id:uid("m"), direction:"outbound", subject:subj, body_html:html, body_text:body, date:Date.now(), message_id:j.messageId, attachments:(state.attachments||[]).map(function(f){return {filename:f.name,size:f.size};}) });
+        state.draftReply=""; state.attachments=[];
+        render(); flash("Enviado a "+firstName(t.contact_name));
+      }, function(e){ state.sending=false; if(String(e.message)!=="401"){ flash("Error de red al enviar"); render(); } });
   }
   function scheduleFollow(){
     var t=threadById(state.openThread); if(!t) return;
@@ -1242,12 +1267,29 @@ window.OPSEG = (function () {
 
   function flash(msg){ state.toast=msg; renderToast(); clearTimeout(flash._t); flash._t=setTimeout(function(){ state.toast=""; renderToast(); },2600); }
 
-  function doConnect(provider){
-    var email=(state.connectEmail||"").trim();
-    if(!email || email.indexOf("@")===-1){ flash("Escribe un email válido"); return; }
-    state.account={ email:email, provider:provider||"IMAP" };
-    seedInbox(); render(); flash("Cuenta conectada · "+email);
+  function doConnect(){
+    var email=(state.cEmail||"").trim();
+    if(!email||email.indexOf("@")===-1){ state.connError="Escribe un email válido"; render(); return; }
+    if(!state.cPass){ state.connError="Escribe la contraseña"; render(); return; }
+    if(!state.cImapHost||!state.cSmtpHost){ state.connError="Rellena los servidores IMAP y SMTP"; render(); return; }
+    state.connecting=true; state.connError=""; render();
+    fetch("/api/email/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      email:email, password:state.cPass,
+      imapHost:state.cImapHost.trim(), imapPort:Number(state.cImapPort)||993,
+      smtpHost:state.cSmtpHost.trim(), smtpPort:Number(state.cSmtpPort)||465
+    })})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(res){
+        state.connecting=false;
+        if(!res.ok){ state.connError=(res.j&&(res.j.detail||res.j.error))||"No se pudo conectar"; render(); return; }
+        emailToken=res.j.token;
+        try{ localStorage.setItem("op_email_token",emailToken); localStorage.setItem("op_email_addr",res.j.email); }catch(e){}
+        state.account={ email:res.j.email }; state.cPass="";
+        render(); flash("Correo conectado · "+res.j.email);
+      }, function(){ state.connecting=false; state.connError="Error de red — ¿el servidor está activo?"; render(); });
   }
+  var PRESETS={ ionos:["imap.ionos.es","993","smtp.ionos.es","465"], gmail:["imap.gmail.com","993","smtp.gmail.com","465"], outlook:["outlook.office365.com","993","smtp.office365.com","587"] };
+  function applyPreset(p){ var v=PRESETS[p]; if(!v) return; state.cImapHost=v[0]; state.cImapPort=v[1]; state.cSmtpHost=v[2]; state.cSmtpPort=v[3]; render(); }
   function seedInbox(){
     ["laura.mendez@finora.es","carlos@brightpack.io"].forEach(function(e){
       var d=DIRECTORY.filter(function(x){return x.email===e;})[0];
@@ -1282,14 +1324,19 @@ window.OPSEG = (function () {
     document.addEventListener("drop", function(e){ if(!active||!drag.fu) return; var cell=e.target.closest(".seg-day"); if(cell){ e.preventDefault(); cell.classList.remove("drop-hot"); rescheduleFollow(drag.fu, parseInt(cell.getAttribute("data-day"),10)); drag.fu=null; } });
     listeners=true;
   }
-  function onInput(e){ if(!active) return; var el=e.target.closest("[data-sm]"); if(!el) return; var mo=el.getAttribute("data-sm"); state[mo]=el.value; if(mo==="importQuery"){ var s=document.getElementById("opseg-import-sugg"); if(s) s.innerHTML=importSuggestions(); } }
+  function onInput(e){ if(!active) return;
+    if(e.target.id==="opseg-attach"){ var fs=e.target.files; if(fs&&fs.length){ for(var i=0;i<fs.length;i++) state.attachments.push(fs[i]); renderDrawer(); } return; }
+    var el=e.target.closest("[data-sm]"); if(!el) return; var mo=el.getAttribute("data-sm"); state[mo]=el.value; if(mo==="importQuery"){ var s=document.getElementById("opseg-import-sugg"); if(s) s.innerHTML=importSuggestions(); }
+  }
   function onClick(e){
     if(!active) return;
     var b=e.target.closest("[data-sa]"); if(!b) return;
     var a=b.getAttribute("data-sa");
     switch(a){
-      case "prov": doConnect(b.getAttribute("data-p")); break;
-      case "connect": doConnect("IMAP"); break;
+      case "connect": doConnect(); break;
+      case "conn-preset": applyPreset(b.getAttribute("data-p")); break;
+      case "attach-remove": { var ai=parseInt(b.getAttribute("data-i"),10); state.attachments.splice(ai,1); renderDrawer(); break; }
+      case "link-add": { var lu=(state.linkUrl||"").trim(); if(!lu){ flash("Escribe una URL"); break; } state.draftReply=(state.draftReply?state.draftReply+"\n":"")+lu; state.linkUrl=""; renderDrawer(); break; }
       case "import-open": state.importOpen=true; state.importQuery=""; render(); setTimeout(function(){ var i=document.getElementById("opseg-import-input"); if(i) i.focus(); },30); break;
       case "import-close": if(e.target===b){ state.importOpen=false; render(); } break;
       case "import-do": importConversation(b.getAttribute("data-email")||state.importQuery); break;
@@ -1311,17 +1358,19 @@ window.OPSEG = (function () {
 
   // ---------- inline render ----------
   function connectCard(){
-    return '<div style="display:flex;justify-content:center;padding:34px 10px;">'
-      + '<div style="width:100%;max-width:440px;background:#fff;border:1px solid #edeaf7;border-radius:20px;padding:30px 28px;box-shadow:0 16px 40px rgba(122,90,248,0.08);">'
+    function fld(label,model,val,ph,type,w){ return '<label style="display:block;flex:'+(w||"1")+';min-width:0;"><span style="display:block;font-size:11.5px;font-weight:500;color:#57565f;margin-bottom:5px;">'+label+'</span><input class="seg-in" data-sm="'+model+'"'+(type?' type="'+type+'"':'')+' value="'+esc(val)+'" placeholder="'+esc(ph||"")+'" style="width:100%;padding:11px 13px;border:1px solid #e7e2f5;border-radius:11px;font-size:14px;font-weight:300;outline:none;"></label>'; }
+    var presets=[["ionos","IONOS"],["gmail","Gmail"],["outlook","Outlook"]].map(function(p){ return '<button class="seg-ghost" data-sa="conn-preset" data-p="'+p[0]+'" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;padding:7px 13px;font-size:12.5px;cursor:pointer;">'+p[1]+'</button>'; }).join("");
+    return '<div style="display:flex;justify-content:center;padding:26px 10px;">'
+      + '<div style="width:100%;max-width:520px;background:#fff;border:1px solid #edeaf7;border-radius:20px;padding:28px 26px;box-shadow:0 16px 40px rgba(122,90,248,0.08);">'
       + '<h2 style="margin:0 0 6px;font-size:20px;font-weight:400;letter-spacing:-0.02em;">Conecta tu correo</h2>'
-      + '<p style="margin:0 0 20px;font-size:13.5px;font-weight:300;color:#8b8699;line-height:1.5;">Sincroniza tu buzón para importar conversaciones y programar follow-ups en el calendario.</p>'
-      + '<label style="display:block;font-size:12.5px;font-weight:500;color:#57565f;margin-bottom:7px;">Tu email</label>'
-      + '<input id="opseg-connect" class="seg-in" data-sm="connectEmail" value="'+esc(state.connectEmail)+'" placeholder="tu@empresa.com" style="width:100%;padding:12px 14px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;font-weight:300;outline:none;margin-bottom:15px;">'
-      + '<div style="display:flex;gap:10px;margin-bottom:15px;">'
-      + '<button class="seg-ghost" data-sa="prov" data-p="Gmail" style="flex:1;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:11px;padding:11px;font-size:13px;cursor:pointer;">Gmail / Google</button>'
-      + '<button class="seg-ghost" data-sa="prov" data-p="IMAP" style="flex:1;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:11px;padding:11px;font-size:13px;cursor:pointer;">IMAP / SMTP</button></div>'
-      + '<button class="seg-primary" data-sa="connect" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:12px;padding:13px;font-size:14.5px;cursor:pointer;box-shadow:0 12px 26px rgba(122,90,248,0.3);">Conectar cuenta</button>'
-      + '<p style="margin:14px 0 0;font-size:11.5px;font-weight:300;color:#a8a3b8;text-align:center;">Prototipo · no se envían credenciales a ningún servidor.</p>'
+      + '<p style="margin:0 0 16px;font-size:13.5px;font-weight:300;color:#8b8699;line-height:1.5;">Importa conversaciones reales por IMAP y responde por SMTP con adjuntos. Tus datos van cifrados por HTTPS y se guardan solo en el servidor.</p>'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;"><span style="font-size:12px;color:#8b8699;">Rellenar auto:</span>'+presets+'</div>'
+      + '<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">'+fld("Email","cEmail",state.cEmail,"tu@empresa.com","email")+fld("Contraseña","cPass",state.cPass,"contraseña o app password","password")+'</div>'
+      + '<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">'+fld("Servidor IMAP","cImapHost",state.cImapHost,"imap.tu-proveedor.com","","2")+fld("Puerto","cImapPort",state.cImapPort,"993","","0 0 90px")+'</div>'
+      + '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">'+fld("Servidor SMTP","cSmtpHost",state.cSmtpHost,"smtp.tu-proveedor.com","","2")+fld("Puerto","cSmtpPort",state.cSmtpPort,"465","","0 0 90px")+'</div>'
+      + (state.connError?'<div style="font-size:12.5px;color:#b0234c;margin-bottom:12px;background:#fdeaef;border-radius:9px;padding:9px 12px;">'+esc(state.connError)+'</div>':'')
+      + '<button class="seg-primary" data-sa="connect" '+(state.connecting?'disabled':'')+' style="width:100%;border:none;background:'+(state.connecting?"#b9a7fb":"#7a5af8")+';color:#fff;border-radius:12px;padding:13px;font-size:14.5px;cursor:'+(state.connecting?"default":"pointer")+';box-shadow:0 12px 26px rgba(122,90,248,0.3);">'+(state.connecting?"Conectando…":"Conectar correo")+'</button>'
+      + '<p style="margin:12px 0 0;font-size:11.5px;font-weight:300;color:#a8a3b8;line-height:1.5;">Gmail/Outlook con 2FA necesitan una «contraseña de aplicación». IONOS usa tu contraseña normal.</p>'
       + '</div></div>';
   }
   function convPanel(){
@@ -1419,8 +1468,12 @@ window.OPSEG = (function () {
       + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="font-size:13.5px;font-weight:500;">Escribir</span><div style="margin-left:auto;display:flex;gap:6px;">'+toneChips+'</div></div>'
       + '<textarea data-sm="draftReply" class="seg-in" placeholder="Escribe tu mensaje o genéralo con IA…" style="width:100%;min-height:84px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftReply)+'</textarea>'
-      + '<div style="display:flex;gap:8px;margin-top:10px;"><button class="seg-ghost" data-sa="gen-reply" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
-      + '<button class="seg-primary" data-sa="send-reply" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 16px;font-size:12.5px;cursor:pointer;">Enviar</button></div></div>'
+      + ((state.attachments&&state.attachments.length)?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+state.attachments.map(function(f,i){return '<span style="display:inline-flex;align-items:center;gap:6px;background:#f4f2ff;border:1px solid #e3ddf7;border-radius:8px;padding:4px 9px;font-size:11.5px;color:#5b3ad9;">📎 '+esc(f.name)+' <button data-sa="attach-remove" data-i="'+i+'" style="border:none;background:transparent;color:#b0234c;cursor:pointer;font-size:12px;padding:0;">✕</button></span>';}).join("")+'</div>':'')
+      + '<div style="display:flex;gap:8px;margin-top:8px;"><input data-sm="linkUrl" class="seg-in" value="'+esc(state.linkUrl)+'" placeholder="https://… (link a insertar)" style="flex:1;border:1px solid #e7e2f5;border-radius:9px;padding:8px 11px;font-size:12.5px;outline:none;"><button class="seg-ghost" data-sa="link-add" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">Insertar link</button></div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;">'
+      + '<label style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">📎 Adjuntar<input id="opseg-attach" type="file" multiple style="display:none;"></label>'
+      + '<button class="seg-ghost" data-sa="gen-reply" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
+      + '<button class="seg-primary" data-sa="send-reply" '+(state.sending?"disabled":"")+' style="margin-left:auto;border:none;background:'+(state.sending?"#b9a7fb":"#7a5af8")+';color:#fff;border-radius:9px;padding:8px 16px;font-size:12.5px;cursor:'+(state.sending?"default":"pointer")+';">'+(state.sending?"Enviando…":"Enviar")+'</button></div></div>'
       + '<div style="margin-top:14px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
       + '<div style="font-size:13.5px;font-weight:500;margin-bottom:10px;">Programar follow-up</div>'
       + '<textarea data-sm="draftFollow" class="seg-in" placeholder="Cuerpo del follow-up…" style="width:100%;min-height:64px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftFollow)+'</textarea>'
@@ -1432,18 +1485,11 @@ window.OPSEG = (function () {
       + '</div></div>';
   }
   function importSuggestions(){
-    var q=state.importQuery.trim().toLowerCase();
-    var imported=state.threads.map(function(t){return t.email.toLowerCase();});
-    var list=DIRECTORY.filter(function(d){ if(imported.indexOf(d.email.toLowerCase())!==-1) return false; if(!q) return true; return (d.email+" "+d.name+" "+d.company).toLowerCase().indexOf(q)!==-1; });
-    var rows=list.map(function(d){
-      return '<button class="seg-conv" data-sa="import-do" data-email="'+esc(d.email)+'" style="text-align:left;width:100%;border:none;border-bottom:1px solid #f4f2fb;background:#fff;padding:11px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;">'
-        + '<span style="width:34px;height:34px;flex:none;border-radius:9px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">'+esc(initials(d.name))+'</span>'
-        + '<span style="min-width:0;flex:1;line-height:1.3;"><span style="display:block;font-size:13.5px;font-weight:500;">'+esc(d.name)+' · '+esc(d.company)+'</span><span style="display:block;font-size:12px;font-weight:300;color:#8b8699;">'+esc(d.email)+'</span></span>'
-        + '<span style="font-size:11.5px;color:#5b3ad9;">Importar →</span></button>';
-    }).join("");
-    var custom=q&&q.indexOf("@")!==-1&&list.every(function(d){return d.email.toLowerCase()!==q;})
-      ? '<button class="seg-conv" data-sa="import-do" data-email="'+esc(q)+'" style="text-align:left;width:100%;border:none;background:#fbfaff;padding:11px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;"><span style="width:34px;height:34px;flex:none;border-radius:9px;background:#f4f2ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:15px;">＋</span><span style="min-width:0;flex:1;font-size:13px;font-weight:400;color:#5b3ad9;">Importar «'+esc(q)+'»</span></button>' : "";
-    return (rows+custom)||'<div style="padding:20px 14px;font-size:12.5px;font-weight:300;color:#a8a3b8;text-align:center;">Escribe el email de la persona para importar la conversación.</div>';
+    if(state.importing) return '<div style="padding:22px 14px;font-size:13px;font-weight:300;color:#5b3ad9;text-align:center;">Buscando en tu buzón por IMAP…</div>';
+    var q=state.importQuery.trim();
+    var valid=q.indexOf("@")!==-1 && q.indexOf(".")!==-1;
+    if(!valid) return '<div style="padding:20px 14px;font-size:12.5px;font-weight:300;color:#a8a3b8;text-align:center;">Escribe el email completo de la persona y pulsa importar.</div>';
+    return '<button class="seg-conv" data-sa="import-do" data-email="'+esc(q)+'" style="text-align:left;width:100%;border:none;background:#fbfaff;padding:13px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;"><span style="width:34px;height:34px;flex:none;border-radius:9px;background:#f4f2ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:15px;">↓</span><span style="min-width:0;flex:1;font-size:13.5px;font-weight:500;color:#5b3ad9;">Importar conversación con «'+esc(q)+'»</span></button>';
   }
   function renderModal(){
     var host=document.getElementById("opseg-modal"); if(!host) return;

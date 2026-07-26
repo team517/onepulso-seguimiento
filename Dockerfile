@@ -1,8 +1,13 @@
-FROM nginx:alpine
+FROM node:20-alpine
+WORKDIR /app
 
-# Copia el sitio estático
-COPY index.html Plataforma.html /usr/share/nginx/html/
-COPY assets/ /usr/share/nginx/html/assets/
+# Instala dependencias primero (mejor cache)
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
 
-# nginx sirve /usr/share/nginx/html en el puerto 80 por defecto
-EXPOSE 80
+# Copia el resto (server + web + assets)
+COPY . .
+
+ENV PORT=3000
+EXPOSE 3000
+CMD ["node", "server.js"]
