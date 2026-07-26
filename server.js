@@ -20,6 +20,58 @@ function escapeHtml(s) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
 }
+function prettyName(email) {
+  var lp = String(email || "").split("@")[0].replace(/[._-]+/g, " ");
+  return lp.replace(/\b\w/g, function (c) { return c.toUpperCase(); }).trim() || String(email || "");
+}
+// Lista rápida de hilos: solo cabeceras (envelope) de INBOX + Enviados, agrupados por contacto
+async function getThreads(creds) {
+  const me = String(creds.email || creds.imap.user).toLowerCase();
+  const client = new ImapFlow({
+    host: creds.imap.host, port: Number(creds.imap.port), secure: creds.imap.secure !== false,
+    auth: { user: creds.imap.user, pass: creds.imap.pass }, logger: false, socketTimeout: 30000
+  });
+  await client.connect();
+  const map = {};
+  try {
+    const boxes = await client.list();
+    const targets = boxes.filter(function (b) {
+      if (b.flags && b.flags.has && b.flags.has("\\Noselect")) return false;
+      const p = (b.path || "").toLowerCase();
+      const sent = b.specialUse === "\\Sent" || /(^|[\/.])sent|enviad/i.test(p);
+      const inbox = p === "inbox" || b.specialUse === "\\Inbox";
+      return inbox || sent;
+    });
+    for (const box of targets) {
+      let lock;
+      try { lock = await client.getMailboxLock(box.path); } catch (e) { continue; }
+      try {
+        const total = (client.mailbox && client.mailbox.exists) || 0;
+        if (!total) continue;
+        const start = Math.max(1, total - 150 + 1);
+        for await (const m of client.fetch(start + ":*", { envelope: true })) {
+          const env = m.envelope; if (!env) continue;
+          const fromAddr = (env.from && env.from[0] && env.from[0].address || "").toLowerCase();
+          const toArr = env.to || [];
+          const outbound = fromAddr === me;
+          let other = "", otherName = "";
+          if (outbound) { other = (toArr[0] && toArr[0].address || "").toLowerCase(); otherName = toArr[0] && toArr[0].name || ""; }
+          else { other = fromAddr; otherName = env.from && env.from[0] && env.from[0].name || ""; }
+          if (!other || other === me) continue;
+          const date = env.date ? new Date(env.date).getTime() : Date.now();
+          const cur = map[other] || { contact_email: other, contact_name: "", subject: "", last_date: 0, count: 0, last_dir: "inbound" };
+          cur.count++;
+          if (!cur.contact_name && otherName) cur.contact_name = otherName;
+          if (date >= cur.last_date) { cur.last_date = date; cur.subject = env.subject || cur.subject; cur.last_dir = outbound ? "outbound" : "inbound"; if (otherName) cur.contact_name = otherName; }
+          map[other] = cur;
+        }
+      } finally { try { lock.release(); } catch (e) {} }
+    }
+  } finally { try { await client.logout(); } catch (e) {} }
+  const threads = Object.keys(map).map(function (k) { const t = map[k]; if (!t.contact_name) t.contact_name = prettyName(t.contact_email); return t; });
+  threads.sort(function (a, b) { return b.last_date - a.last_date; });
+  return threads;
+}
 function auth(req, res, next) {
   const h = req.headers.authorization || "";
   const token = h.indexOf("Bearer ") === 0 ? h.slice(7) : "";
@@ -128,6 +180,15 @@ app.post("/api/email/connect", async function (req, res) {
     res.json({ token: token, email: email });
   } catch (e) {
     res.status(400).json({ error: "conexion_fallida", detail: String(e && e.message || e) });
+  }
+});
+
+app.post("/api/email/threads", auth, async function (req, res) {
+  try {
+    const threads = await getThreads(req.creds);
+    res.json({ threads: threads });
+  } catch (e) {
+    res.status(500).json({ error: "threads_fallido", detail: String(e && e.message || e) });
   }
 });
 
