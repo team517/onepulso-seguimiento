@@ -186,6 +186,7 @@
     return state.tasks.length - 1;
   }
   function drawScheduleCanvas(done) {
+    computeHours();
     var SC = 2;                                   // supersampling → PDF nítido
     var first = state.horFrom, last = state.horTo;
     var margin = 34, gut = 62, rowH = 50, headH = 48, headerH = 84;
@@ -310,10 +311,14 @@
     return a;
   }
   function computeHours() {
-    var mn = 24, mx = 0, any = false;
-    (state.avail || []).forEach(function (a) { if (a.enabled) a.ranges.forEach(function (r) { if (r.to > r.from) { any = true; if (r.from < mn) mn = r.from; if (r.to > mx) mx = r.to; } }); });
-    if (!any) { state.horFrom = 8; state.horTo = 20; }
-    else { state.horFrom = mn; state.horTo = (mx <= mn ? mn + 1 : mx); }
+    // El calendario muestra el día completo (mínimo 8:00–20:00), ampliándose
+    // si la disponibilidad, tareas o descansos caen fuera de esa base.
+    var mn = 8, mx = 20;
+    function inc(f, t) { if (f < mn) mn = f; if (t > mx) mx = t; }
+    (state.avail || []).forEach(function (a) { if (a.enabled) a.ranges.forEach(function (r) { if (r.to > r.from) inc(r.from, r.to); }); });
+    (state.tasks || []).forEach(function (t) { if (t.start != null) { var sh = new Date(t.start).getHours(); inc(sh, sh + (t.durH || 1)); } });
+    (state.breaks || []).forEach(function (b) { var sh = new Date(b.start).getHours(); inc(sh, sh + (b.durH || 1)); });
+    state.horFrom = Math.max(0, mn); state.horTo = Math.min(24, mx);
   }
   function quickAddCreate() {
     var qa = state.quickAdd; if (!qa) return;
@@ -553,6 +558,7 @@
   }
 
   function horarioView() {
+    computeHours();
     var first = state.horFrom, last = state.horTo, rowH = HOR_ROWH, totalH = (last - first) * rowH;
     var ws = state.weekStart, todayD = dayStartP(Date.now());
     var dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -690,11 +696,13 @@
       + '<button data-act="hor-franja-save" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 18px;font-size:13px;cursor:pointer;box-shadow:0 8px 20px rgba(122,90,248,0.28);">Guardar</button>'
       + '</div></div>' : '';
     var activeDays = (state.avail || []).filter(function (a) { return a.enabled && a.ranges.length; }).length;
+    var asp = null;
+    (state.avail || []).forEach(function (a) { if (a.enabled) a.ranges.forEach(function (r) { if (r.to > r.from) { if (!asp) asp = { from: r.from, to: r.to }; else { if (r.from < asp.from) asp.from = r.from; if (r.to > asp.to) asp.to = r.to; } } }); });
     var franja = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:11px 15px;box-shadow:0 6px 18px rgba(122,90,248,0.04);">'
       + '<span style="font-size:12.5px;font-weight:600;color:#57565f;">Horario semanal</span>'
       + '<button data-act="av-open" style="display:inline-flex;align-items:center;gap:8px;border:1px solid #7a5af8;background:#f4f2ff;color:#5b3ad9;border-radius:10px;padding:8px 14px;font-size:13.5px;font-weight:500;cursor:pointer;">🗓 Organizar horario</button>'
-      + '<span style="font-size:11.5px;color:#8b8699;">' + p2(first) + ':00 – ' + p2(last) + ':00 · ' + activeDays + ' días activos</span>'
-      + '<span style="margin-left:auto;font-size:11.5px;color:#8b8699;">' + (last - first) + ' horas visibles</span>'
+      + '<span style="font-size:11.5px;color:#8b8699;">' + (asp ? "Disponible " + p2(asp.from) + ":00–" + p2(asp.to) + ":00 · " : "") + activeDays + ' días activos</span>'
+      + '<span style="margin-left:auto;font-size:11.5px;color:#8b8699;">Vista ' + p2(first) + ':00–' + p2(last) + ':00</span>'
       + '</div>';
 
     // mini-formulario para escribir una tarea nueva
