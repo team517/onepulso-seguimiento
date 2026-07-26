@@ -1204,9 +1204,13 @@ window.OPSEG = (function () {
       .then(function(j){
         state.importing=false;
         if(j.error){ flash("Error al importar: "+(j.detail||j.error)); render(); return; }
-        var msgs=(j.messages||[]).map(function(mm){ return { id:mm.id||uid("m"), direction:mm.direction, from:mm.from, to:mm.to, subject:mm.subject, body_html:mm.body_html, body_text:mm.body_text, date:mm.date, message_id:mm.message_id, in_reply_to:mm.in_reply_to, references:mm.references||[], attachments:mm.attachments||[] }; });
+        var msgs=(j.messages||[]).map(function(mm){ return { id:mm.id||uid("m"), direction:mm.direction, from:mm.from, from_addr:mm.from_addr, to:mm.to||[], cc:mm.cc||[], subject:mm.subject, body_html:mm.body_html, body_text:mm.body_text, date:mm.date, message_id:mm.message_id, in_reply_to:mm.in_reply_to, references:mm.references||[], attachments:mm.attachments||[] }; });
         var name=prettyName(email);
-        var t={ id:uid("t"), email:email, contact_name:name, company:(email.split("@")[1]||""), subject:(msgs[msgs.length-1]&&msgs[msgs.length-1].subject)||("Conversación con "+name), status:"active", messages:msgs, followups:[] };
+        var me=(state.account&&state.account.email||"").toLowerCase(), pset={};
+        msgs.forEach(function(mm){ [].concat(mm.from_addr?[mm.from_addr]:[], mm.to||[], mm.cc||[]).forEach(function(a){ a=(a||"").toLowerCase().trim(); if(a&&a!==me) pset[a]=true; }); });
+        if(!pset[email.toLowerCase()]) pset[email.toLowerCase()]=true;
+        var participants=Object.keys(pset);
+        var t={ id:uid("t"), email:email, contact_name:name, company:(email.split("@")[1]||""), participants:participants, subject:(msgs[msgs.length-1]&&msgs[msgs.length-1].subject)||("Conversación con "+name), status:"active", messages:msgs, followups:[] };
         state.threads.push(t); state.openThread=t.id; state.importOpen=false; state.importQuery="";
         render(); flash(msgs.length?("Importados "+msgs.length+" mensajes con "+name):("Sin mensajes previos con "+email));
       }, function(e){ state.importing=false; if(String(e.message)!=="401"){ flash("Error de red al importar"); render(); } });
@@ -1216,7 +1220,7 @@ window.OPSEG = (function () {
     var body=(state.draftReply||"").trim();
     if(!body && !(state.attachments&&state.attachments.length)){ flash("Escribe una respuesta o adjunta algo"); return; }
     var html=textToHtml(body);
-    var lm=lastMsg(t), to=t.email;
+    var lm=lastMsg(t), to=(t.participants&&t.participants.length)?t.participants.join(", "):t.email;
     var subj=(lm&&lm.subject)?("Re: "+lm.subject.replace(/^\s*re:\s*/i,"")):("Re: "+(t.subject||""));
     var fd=new FormData();
     fd.append("to",to); fd.append("subject",subj); fd.append("html",html); fd.append("text",body);
@@ -1341,7 +1345,7 @@ window.OPSEG = (function () {
       case "import-close": if(e.target===b){ state.importOpen=false; render(); } break;
       case "import-do": importConversation(b.getAttribute("data-email")||state.importQuery); break;
       case "open": state.openThread=b.getAttribute("data-id"); state.draftReply=""; state.draftFollow=""; state.schedInput=defaultSched(); render(); break;
-      case "drawer-close": state.openThread=null; render(); break;
+      case "drawer-close": if(e.target===b){ state.openThread=null; state.draftReply=""; state.attachments=[]; render(); } break;
       case "prev-month": state.calMonth=shiftMonth(-1); render(); break;
       case "next-month": state.calMonth=shiftMonth(1); render(); break;
       case "today-month": var d=new Date(); state.calMonth={y:d.getFullYear(),m:d.getMonth()}; render(); break;
@@ -1438,12 +1442,14 @@ window.OPSEG = (function () {
     if(!active||!t){ host.innerHTML=""; return; }
     var transcript=t.messages.map(function(mm){
       var out=mm.direction==="outbound";
-      return '<div style="display:flex;'+(out?"justify-content:flex-end;":"")+'"><div style="max-width:82%;background:'+(out?"#f2effc":"#fff")+';border:1px solid '+(out?"#e3ddf7":"#edeaf7")+';border-radius:'+(out?"13px 13px 4px 13px":"13px 13px 13px 4px")+';padding:11px 13px;">'
-        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;"><span style="font-size:11.5px;font-weight:500;color:'+(out?"#5b3ad9":"#141319")+';">'+(out?ME_NAME:esc(firstName(t.contact_name)))+'</span>'
+      var who=out?"Tú":(((mm.from||"").replace(/<[^>]*>/,"").replace(/["]/g,"").trim())||mm.from_addr||firstName(t.contact_name));
+      return '<div style="display:flex;'+(out?"justify-content:flex-end;":"")+'"><div style="max-width:74%;background:'+(out?"#f2effc":"#fff")+';border:1px solid '+(out?"#e3ddf7":"#edeaf7")+';border-radius:'+(out?"14px 14px 4px 14px":"14px 14px 14px 4px")+';padding:12px 15px;box-shadow:0 2px 8px rgba(20,19,25,0.04);">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;"><span style="font-size:12px;font-weight:600;color:'+(out?"#5b3ad9":"#141319")+';">'+esc(who)+'</span>'
         + (mm._followup?'<span style="font-size:9.5px;color:#5b3ad9;background:#ece7ff;padding:1px 6px;border-radius:99px;">follow-up</span>':'')
+        + (mm.attachments&&mm.attachments.length?'<span style="font-size:10.5px;color:#8b8699;">📎 '+mm.attachments.length+'</span>':'')
         + '<span style="margin-left:auto;font-size:10.5px;color:#a8a3b8;">'+fmt(mm.date)+'</span></div>'
-        + '<div style="font-size:13px;font-weight:300;color:#3a3942;line-height:1.55;">'+(mm.body_html||("<p>"+esc(mm.body_text)+"</p>"))+'</div></div></div>';
-    }).join('<div style="height:10px;"></div>');
+        + '<div style="font-size:13.5px;font-weight:300;color:#3a3942;line-height:1.6;">'+(mm.body_html||("<p>"+esc(mm.body_text)+"</p>"))+'</div></div></div>';
+    }).join('<div style="height:12px;"></div>');
     var fus=t.followups.filter(function(f){return f.status==="scheduled";}).sort(function(a,b){return a.scheduled_at-b.scheduled_at;});
     var fuList=fus.length?'<div style="display:flex;flex-direction:column;gap:7px;">'+fus.map(function(f){
       return '<div style="display:flex;align-items:center;gap:9px;border:1px solid #f1eefa;border-radius:10px;padding:8px 10px;background:#fcfbff;">'
@@ -1456,14 +1462,14 @@ window.OPSEG = (function () {
     var toneChips=[["normal","Normal"],["directo","Directo"],["cercano","Cercano"]].map(function(x){ var on=state.replyTone===x[0];
       return '<button class="seg-ghost" data-sa="tone" data-t="'+x[0]+'" style="border:1px solid '+(on?"#7a5af8":"#e7e2f5")+';background:'+(on?"#f4f2ff":"#fff")+';color:'+(on?"#5b3ad9":"#57565f")+';border-radius:99px;padding:5px 11px;font-size:11.5px;cursor:pointer;">'+x[1]+'</button>'; }).join("");
     host.innerHTML=
-      '<div data-sa="drawer-close" style="position:fixed;inset:0;z-index:90;background:rgba(20,19,25,0.28);"></div>'
-      + '<div class="seg-drawer seg-scroll" style="position:fixed;top:0;right:0;height:100vh;width:460px;z-index:100;background:#faf9fe;box-shadow:-20px 0 50px rgba(20,19,25,0.14);display:flex;flex-direction:column;overflow:auto;">'
-      + '<div style="flex:none;background:#fff;border-bottom:1px solid #edeaf7;padding:15px 18px;display:flex;align-items:center;gap:12px;">'
-      + '<span style="width:40px;height:40px;flex:none;border-radius:11px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;">'+esc(initials(t.contact_name))+'</span>'
-      + '<div style="min-width:0;flex:1;"><div style="font-size:15px;font-weight:500;">'+esc(t.contact_name)+'</div><div style="font-size:12px;font-weight:300;color:#8b8699;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.company)+' · '+esc(t.email)+'</div></div>'
-      + '<button class="seg-ghost" data-sa="drawer-close" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;width:32px;height:32px;cursor:pointer;font-size:14px;">✕</button></div>'
-      + '<div class="seg-scroll" style="flex:1;min-height:0;padding:18px;overflow:auto;">'
-      + '<div style="font-size:11.5px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#a8a3b8;margin-bottom:12px;">Conversación importada</div>'
+      '<div data-sa="drawer-close" style="position:fixed;inset:0;z-index:90;background:rgba(20,19,25,0.42);display:flex;align-items:center;justify-content:center;padding:20px;">'
+      + '<div style="width:100%;max-width:900px;height:88vh;background:#faf9fe;border-radius:18px;box-shadow:0 40px 90px rgba(20,19,25,0.4);display:flex;flex-direction:column;overflow:hidden;">'
+      + '<div style="flex:none;background:#fff;border-bottom:1px solid #edeaf7;padding:18px 24px;display:flex;align-items:center;gap:14px;">'
+      + '<span style="width:44px;height:44px;flex:none;border-radius:12px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">'+esc(initials(t.contact_name))+'</span>'
+      + '<div style="min-width:0;flex:1;"><div style="font-size:17px;font-weight:500;">'+esc(t.contact_name)+'</div><div style="font-size:12.5px;font-weight:300;color:#8b8699;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+((t.participants&&t.participants.length)?("Con: "+t.participants.map(esc).join(", ")):esc(t.email))+'</div></div>'
+      + '<button class="seg-ghost" data-sa="drawer-close" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:15px;">✕</button></div>'
+      + '<div class="seg-scroll" style="flex:1;min-height:0;padding:22px 26px;overflow:auto;">'
+      + '<div style="max-width:820px;margin:0 auto;">'
       + '<div style="display:flex;flex-direction:column;">'+transcript+'</div>'
       + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="font-size:13.5px;font-weight:500;">Escribir</span><div style="margin-left:auto;display:flex;gap:6px;">'+toneChips+'</div></div>'
@@ -1482,7 +1488,7 @@ window.OPSEG = (function () {
       + '<button class="seg-ghost" data-sa="gen-follow" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
       + '<button class="seg-primary" data-sa="sched-follow" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 15px;font-size:12.5px;cursor:pointer;">Programar</button></div>'
       + '<div style="margin-top:14px;border-top:1px solid #f4f2fb;padding-top:12px;"><div style="font-size:11.5px;font-weight:600;color:#8b8699;margin-bottom:8px;">Programados</div>'+fuList+'</div></div>'
-      + '</div></div>';
+      + '</div></div></div></div>';
   }
   function importSuggestions(){
     if(state.importing) return '<div style="padding:22px 14px;font-size:13px;font-weight:300;color:#5b3ad9;text-align:center;">Buscando en tu buzón por IMAP…</div>';
