@@ -1187,6 +1187,10 @@ window.OPSEG = (function () {
   try{ emailToken=localStorage.getItem("op_email_token")||""; var _em=localStorage.getItem("op_email_addr"); if(emailToken&&_em) state.account={email:_em}; }catch(e){}
   function apiFetch(u,o){ o=o||{}; o.headers=o.headers||{}; if(emailToken) o.headers.Authorization="Bearer "+emailToken; return fetch(u,o); }
   function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); }catch(e){} state.account=null; render(); flash("Sesión de correo caducada · vuelve a conectar"); }
+  var LS_SEG="onepulso_seg_v1", segTimer=null;
+  function saveSeg(){ clearTimeout(segTimer); segTimer=setTimeout(function(){ try{ localStorage.setItem(LS_SEG, JSON.stringify({ threads: state.threads })); }catch(e){} }, 500); }
+  function loadSeg(){ try{ var raw=localStorage.getItem(LS_SEG); if(raw){ var d=JSON.parse(raw); if(d&&Array.isArray(d.threads)) state.threads=d.threads; } }catch(e){} }
+  loadSeg();
 
   function threadById(id){ return state.threads.filter(function(t){return t.id===id;})[0]; }
   function lastMsg(t){ return t.messages.length?t.messages[t.messages.length-1]:null; }
@@ -1516,7 +1520,7 @@ window.OPSEG = (function () {
     h.innerHTML=(active&&state.toast)?'<div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:130;background:#141319;color:#fff;padding:13px 22px;border-radius:13px;font-size:14px;font-weight:300;box-shadow:0 18px 44px rgba(20,19,25,0.3);max-width:90vw;">'+esc(state.toast)+'</div>':"";
   }
 
-  function render(){ attach(); ensureContainers(); renderInline(); renderDrawer(); renderModal(); renderToast(); }
+  function render(){ attach(); ensureContainers(); renderInline(); renderDrawer(); renderModal(); renderToast(); saveSeg(); }
 
   return {
     mount:function(el){ mountEl=el; active=true; render(); },
