@@ -1268,7 +1268,7 @@ window.OPSEG = (function () {
     var body=(state.draftReply||"").trim();
     if(!body && !(state.attachments&&state.attachments.length)){ flash("Escribe una respuesta o adjunta algo"); return; }
     var html=textToHtml(body);
-    var lm=lastMsg(t), to=(t.participants&&t.participants.length)?t.participants.join(", "):t.email;
+    var lm=lastMsg(t), to=t.email;   // responde SOLO a la persona del hilo (no a otras empresas en CC)
     var subj=(lm&&lm.subject)?("Re: "+lm.subject.replace(/^\s*re:\s*/i,"")):("Re: "+(t.subject||""));
     var fd=new FormData();
     fd.append("to",to); fd.append("subject",subj); fd.append("html",html); fd.append("text",body);
@@ -1298,7 +1298,7 @@ window.OPSEG = (function () {
     allFollowups().forEach(function(o){ if(o.f.id===fid && o.f.status==="scheduled"){ var t=o.t,f=o.f; f.status="sent"; f.sent_at=Date.now(); t.messages.push({ id:uid("m"), direction:"outbound", body_html:f.body_html, body_text:stripHtml(f.body_html), date:Date.now(), message_id:uid("mid"), _followup:true }); }});
     render(); flash("Follow-up enviado ahora");
   }
-  function cancelFollow(fid){ allFollowups().forEach(function(o){ if(o.f.id===fid && o.f.status==="scheduled"){ o.f.status="cancelled"; } }); render(); flash("Follow-up cancelado"); }
+  function cancelFollow(fid){ state.threads.forEach(function(t){ t.followups=t.followups.filter(function(f){return f.id!==fid;}); }); render(); flash("Follow-up borrado · la conversación sigue"); }
   function rescheduleFollow(fid,newDayMs){
     var moved=null;
     allFollowups().forEach(function(o){ if(o.f.id===fid){ var d=new Date(o.f.scheduled_at); var nd=new Date(newDayMs); nd.setHours(d.getHours(),d.getMinutes(),0,0); o.f.scheduled_at=nd.getTime(); moved={f:o.f,t:o.t}; }});
