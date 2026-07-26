@@ -1185,9 +1185,22 @@ window.OPSEG = (function () {
   var drag={fu:null};
   var mountEl=null, active=false, listeners=false, containers=false;
   var emailToken="";
-  try{ emailToken=localStorage.getItem("op_email_token")||""; var _em=localStorage.getItem("op_email_addr"); if(emailToken&&_em) state.account={email:_em}; }catch(e){}
-  function apiFetch(u,o){ o=o||{}; o.headers=o.headers||{}; if(emailToken) o.headers.Authorization="Bearer "+emailToken; return fetch(u,o); }
-  function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); }catch(e){} state.account=null; render(); flash("Sesión de correo caducada · vuelve a conectar"); }
+  try{ emailToken=localStorage.getItem("op_email_token")||""; var _em=localStorage.getItem("op_email_addr"); var _cn=localStorage.getItem("op_email_conn"); if((emailToken||_cn)&&_em) state.account={email:_em}; }catch(e){}
+  function getStoredConn(){ try{ var c=localStorage.getItem("op_email_conn"); return c?JSON.parse(c):null; }catch(e){ return null; } }
+  function reconnect(){
+    var conn=getStoredConn(); if(!conn) return Promise.resolve(false);
+    return fetch("/api/email/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(conn)})
+      .then(function(r){ return r.json().then(function(j){ if(r.ok&&j.token){ emailToken=j.token; try{ localStorage.setItem("op_email_token",j.token); localStorage.setItem("op_email_addr",j.email); }catch(e){} return true; } return false; }); }, function(){ return false; });
+  }
+  function apiFetch(u,o){
+    o=o||{}; o.headers=o.headers||{}; if(emailToken) o.headers.Authorization="Bearer "+emailToken;
+    return fetch(u,o).then(function(r){
+      if(r.status!==401 || o._retried || !getStoredConn()) return r;
+      o._retried=true;
+      return reconnect().then(function(ok){ if(!ok) return r; o.headers.Authorization="Bearer "+emailToken; return fetch(u,o); });
+    });
+  }
+  function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); localStorage.removeItem("op_email_conn"); }catch(e){} state.account=null; render(); flash("No se pudo reconectar · vuelve a introducir tus datos"); }
   var LS_SEG="onepulso_seg_v1", segTimer=null;
   function saveSeg(){ clearTimeout(segTimer); segTimer=setTimeout(function(){ try{ localStorage.setItem(LS_SEG, JSON.stringify({ threads: state.threads, inboxThreads: state.inboxThreads })); }catch(e){} }, 500); }
   function loadSeg(){ try{ var raw=localStorage.getItem(LS_SEG); if(raw){ var d=JSON.parse(raw); if(d&&Array.isArray(d.threads)) state.threads=d.threads; if(d&&Array.isArray(d.inboxThreads)) state.inboxThreads=d.inboxThreads; } }catch(e){} }
@@ -1312,17 +1325,14 @@ window.OPSEG = (function () {
     if(!state.cPass){ state.connError="Escribe la contraseña"; render(); return; }
     if(!state.cImapHost||!state.cSmtpHost){ state.connError="Rellena los servidores IMAP y SMTP"; render(); return; }
     state.connecting=true; state.connError=""; render();
-    fetch("/api/email/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      email:email, password:state.cPass,
-      imapHost:state.cImapHost.trim(), imapPort:Number(state.cImapPort)||993,
-      smtpHost:state.cSmtpHost.trim(), smtpPort:Number(state.cSmtpPort)||465
-    })})
+    var conn={ email:email, password:state.cPass, imapHost:state.cImapHost.trim(), imapPort:Number(state.cImapPort)||993, smtpHost:state.cSmtpHost.trim(), smtpPort:Number(state.cSmtpPort)||465 };
+    fetch("/api/email/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(conn)})
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
       .then(function(res){
         state.connecting=false;
         if(!res.ok){ state.connError=(res.j&&(res.j.detail||res.j.error))||"No se pudo conectar"; render(); return; }
         emailToken=res.j.token;
-        try{ localStorage.setItem("op_email_token",emailToken); localStorage.setItem("op_email_addr",res.j.email); }catch(e){}
+        try{ localStorage.setItem("op_email_token",emailToken); localStorage.setItem("op_email_addr",res.j.email); localStorage.setItem("op_email_conn",JSON.stringify(conn)); }catch(e){}
         state.account={ email:res.j.email }; state.cPass="";
         render(); flash("Correo conectado · "+res.j.email+" — importa las conversaciones que quieras");
       }, function(){ state.connecting=false; state.connError="Error de red — ¿el servidor está activo?"; render(); });
