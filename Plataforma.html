@@ -820,11 +820,13 @@
       + '<div style="padding:4px 8px 26px;"><img src="' + (state.logo || "assets/logo-onepulso.png") + '" alt="logo" style="height:30px; max-width:180px; width:auto; display:block;"></div>'
       + '<div id="op-nav" style="display:flex; flex-direction:column; gap:4px;"></div>'
       + '<div style="margin-top:auto; border-top:1px solid #f1eefa; padding-top:16px; display:flex; align-items:center; gap:11px;">'
-      + '<span style="width:36px; height:36px; flex:none; border-radius:50%; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600;">' + (currentUser ? esc(currentUser.email.slice(0, 2).toUpperCase()) : "XF") + '</span>'
+      + '<span style="width:36px; height:36px; flex:none; border-radius:50%; background:#ece7ff; color:#5b3ad9; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600;">' + (currentUser ? esc(currentUser.email.slice(0, 2).toUpperCase()) : "☺") + '</span>'
       + '<span style="line-height:1.3; min-width:0;">'
-      + '<span style="display:block; font-size:13.5px; font-weight:500; color:#141319; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (currentUser ? esc(currentUser.email) : "Xavier Falco") + '</span>'
-      + '<span style="display:block; font-size:12.5px; font-weight:300; color:#8b8699;">' + (currentUser ? "Conectado" : "Admin") + '</span></span>'
-      + (currentUser ? '<button data-act="logout" title="Cerrar sesión" style="margin-left:auto; flex:none; border:1px solid #e7e2f5; background:#fff; color:#57565f; border-radius:9px; padding:6px 10px; font-size:12px; cursor:pointer;">Salir</button>' : '')
+      + '<span style="display:block; font-size:13.5px; font-weight:500; color:#141319; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (currentUser ? esc(currentUser.email) : "Invitado") + '</span>'
+      + '<span style="display:block; font-size:12.5px; font-weight:300; color:#8b8699;">' + (currentUser ? "Sincronizado" : "Guardado en este equipo") + '</span></span>'
+      + (currentUser
+          ? '<button data-act="logout" title="Cerrar sesión" style="margin-left:auto; flex:none; border:1px solid #e7e2f5; background:#fff; color:#57565f; border-radius:9px; padding:6px 10px; font-size:12px; cursor:pointer;">Salir</button>'
+          : '<button data-act="show-auth" title="Guardar en la nube" style="margin-left:auto; flex:none; border:1px solid #7a5af8; background:#f4f2ff; color:#5b3ad9; border-radius:9px; padding:6px 11px; font-size:12px; cursor:pointer;">Entrar</button>')
       + '</div>'
       + '</aside>'
       + '<main style="min-width:0;">'
@@ -1007,6 +1009,7 @@
     if (v.isSeg) { if (window.OPSEG) OPSEG.mount(document.getElementById("op-seg-mount")); }
     else { if (window.OPSEG) OPSEG.hide(); }
     renderToast();
+    renderAuth();
     scheduleSave();
   }
 
@@ -1014,17 +1017,22 @@
   var SUPA_URL = "https://eccujbiqhevqoscsudge.supabase.co";
   var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjY3VqYmlxaGV2cW9zY3N1ZGdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMTY5MTgsImV4cCI6MjEwMDU5MjkxOH0.hPxdwnAI9UhMXyCtyZ1uqA_f9h6wq1S9W3NBpUPqMBo"; // anon public
   var supa = (window.supabase && SUPA_KEY.indexOf("PEGA_AQUI") === -1) ? window.supabase.createClient(SUPA_URL, SUPA_KEY) : null;
-  var currentUser = null, booted = false, authMode = "login", authEmail = "", authPass = "", authMsg = "", saveTimer = null;
+  var currentUser = null, authView = false, authMode = "login", authEmail = "", authPass = "", authMsg = "", saveTimer = null;
+  var LS_KEY = "onepulso_state_v1";
   var PERSIST = ["tasks", "breaks", "avail", "weekStart", "horFrom", "horTo", "clients", "follows", "logo"];
 
   function snapshot() { var o = {}; PERSIST.forEach(function (k) { o[k] = state[k]; }); return o; }
   function applyState(data) { if (!data) return; PERSIST.forEach(function (k) { if (data[k] !== undefined) state[k] = data[k]; }); }
-  function loadState(uid) {
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot())); } catch (e) {} }
+  function loadLocal() { try { var raw = localStorage.getItem(LS_KEY); if (raw) applyState(JSON.parse(raw)); } catch (e) {} }
+  function loadCloud(uid) {
+    if (!supa) return Promise.resolve();
     return supa.from("app_state").select("data").eq("user_id", uid).maybeSingle().then(function (res) {
-      if (res && res.data && res.data.data) applyState(res.data.data);
+      if (res && res.data && res.data.data) { applyState(res.data.data); saveLocal(); }
     }, function () {});
   }
   function scheduleSave() {
+    saveLocal();
     if (!supa || !currentUser) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
@@ -1032,34 +1040,39 @@
     }, 800);
   }
   function saveNow() {
+    saveLocal();
     if (!supa || !currentUser) return;
     clearTimeout(saveTimer);
     supa.from("app_state").upsert({ user_id: currentUser.id, data: snapshot(), updated_at: new Date().toISOString() }).then(function () {}, function () {});
   }
+  function ensureAuthWrap() { if (!document.getElementById("op-authwrap")) { var d = document.createElement("div"); d.id = "op-authwrap"; document.body.appendChild(d); } }
   function renderAuth() {
+    var host = document.getElementById("op-authwrap"); if (!host) return;
+    if (!authView) { host.innerHTML = ""; return; }
     var isS = authMode === "signup";
     var logo = state.logo || "assets/logo-onepulso.png";
-    var bullets = [["🗓", "Horario semanal por horas"], ["🎨", "Colores y descansos"], ["⬇", "PDF con tu logo"], ["☁", "Guardado en tu cuenta"]]
+    var bullets = [["🗓", "Horario semanal por horas"], ["🎨", "Colores y descansos"], ["⬇", "PDF con tu logo"], ["☁", "Sincronizado entre dispositivos"]]
       .map(function (p) { return '<div style="display:flex;align-items:center;gap:11px;"><span style="width:28px;height:28px;flex:none;border-radius:8px;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:14px;">' + p[0] + '</span>' + p[1] + '</div>'; }).join("");
-    document.getElementById("app").innerHTML =
-      '<div class="auth-shell">'
+    host.innerHTML =
+      '<div style="position:fixed;inset:0;z-index:200;overflow:auto;">'
+      + '<div class="auth-shell">'
       + '<div class="auth-hero" style="position:relative;overflow:hidden;padding:56px 52px;color:#fff;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(150deg,#6a48e8,#9d86fb 62%,#c9b8ff);">'
       + '<span style="display:inline-flex;align-self:flex-start;background:#fff;padding:9px 15px;border-radius:12px;margin-bottom:40px;box-shadow:0 10px 30px rgba(20,19,25,0.15);"><img src="' + logo + '" alt="logo" style="height:26px;max-width:180px;"></span>'
       + '<h1 style="margin:0 0 14px;font-size:38px;line-height:1.1;font-weight:500;letter-spacing:-0.02em;">Tu horario,<br>a tu manera.</h1>'
-      + '<p style="margin:0 0 32px;font-size:15px;font-weight:300;line-height:1.6;max-width:360px;opacity:.92;">Monta tu semana estilo Calendly, ponle colores y descansos, y descárgalo en PDF con tu logo.</p>'
+      + '<p style="margin:0 0 32px;font-size:15px;font-weight:300;line-height:1.6;max-width:360px;opacity:.92;">Entra para guardar tu horario en la nube y verlo desde cualquier dispositivo.</p>'
       + '<div style="display:flex;flex-direction:column;gap:13px;font-size:14px;font-weight:300;">' + bullets + '</div></div>'
-      + '<div style="display:flex;align-items:center;justify-content:center;padding:40px 24px;background:#f7f6fc;">'
+      + '<div style="position:relative;display:flex;align-items:center;justify-content:center;padding:40px 24px;background:#f7f6fc;">'
+      + '<button data-act="hide-auth" style="position:absolute;top:20px;right:22px;border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:9px;padding:8px 13px;font-size:13px;cursor:pointer;">← Volver</button>'
       + '<div style="width:100%;max-width:380px;">'
       + '<img src="' + logo + '" alt="logo" style="height:28px;margin-bottom:22px;">'
       + '<h2 style="margin:0 0 6px;font-size:24px;font-weight:400;letter-spacing:-0.02em;">' + (isS ? "Crea tu cuenta" : "Bienvenido de nuevo") + '</h2>'
-      + '<p style="margin:0 0 22px;font-size:13.5px;font-weight:300;color:#8b8699;">' + (isS ? "Empieza a organizar tu horario en segundos." : "Entra para ver tu horario.") + '</p>'
+      + '<p style="margin:0 0 22px;font-size:13.5px;font-weight:300;color:#8b8699;">' + (isS ? "Empieza a sincronizar tu horario." : "Entra para sincronizar tu horario.") + '</p>'
       + '<input data-authmodel="email" value="' + esc(authEmail) + '" placeholder="tu@email.com" autocomplete="username" style="width:100%;padding:13px 15px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:12px;background:#fff;">'
       + '<input data-authmodel="pass" type="password" value="' + esc(authPass) + '" placeholder="Contraseña" autocomplete="' + (isS ? "new-password" : "current-password") + '" style="width:100%;padding:13px 15px;border:1px solid #e7e2f5;border-radius:12px;font-size:14.5px;outline:none;margin-bottom:14px;background:#fff;">'
       + (authMsg ? '<div style="font-size:12.5px;color:#b0234c;margin-bottom:12px;">' + esc(authMsg) + '</div>' : '')
       + '<button data-act="auth-submit" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:12px;padding:14px;font-size:15px;font-weight:400;cursor:pointer;box-shadow:0 12px 26px rgba(122,90,248,0.3);">' + (isS ? "Crear cuenta" : "Entrar") + '</button>'
       + '<div style="text-align:center;margin-top:18px;font-size:13.5px;color:#8b8699;">' + (isS ? "¿Ya tienes cuenta? " : "¿No tienes cuenta? ") + '<a data-act="auth-toggle" style="color:#7a5af8;cursor:pointer;font-weight:500;">' + (isS ? "Entrar" : "Crear una gratis") + '</a></div>'
-      + '</div></div>'
-      + '</div>';
+      + '</div></div></div></div>';
     var em = document.querySelector('[data-authmodel="email"]'); if (em) em.focus();
   }
   function doAuth() {
@@ -1074,36 +1087,34 @@
     }, function () { authMsg = "Error de conexión"; renderAuth(); });
   }
   function initAuthListeners() {
-    var root = document.getElementById("app");
-    root.addEventListener("input", function (e) {
+    document.addEventListener("input", function (e) {
       var el = e.target.closest("[data-authmodel]"); if (!el) return;
       if (el.getAttribute("data-authmodel") === "email") authEmail = el.value; else authPass = el.value;
     });
-    root.addEventListener("keydown", function (e) {
+    document.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && e.target.closest("[data-authmodel]")) { e.preventDefault(); doAuth(); }
     });
-    root.addEventListener("click", function (e) {
+    document.addEventListener("click", function (e) {
       var b = e.target.closest("[data-act]"); if (!b) return;
       var a = b.getAttribute("data-act");
-      if (a === "auth-toggle") { authMode = authMode === "login" ? "signup" : "login"; authMsg = ""; renderAuth(); }
+      if (a === "show-auth") { if (!supa) { flash("Sincronización en la nube no configurada"); return; } authView = true; authMsg = ""; renderAuth(); }
+      else if (a === "hide-auth") { authView = false; renderAuth(); }
+      else if (a === "auth-toggle") { authMode = authMode === "login" ? "signup" : "login"; authMsg = ""; renderAuth(); }
       else if (a === "auth-submit") { doAuth(); }
-      else if (a === "logout") { if (supa) supa.auth.signOut().then(function () { location.reload(); }); }
+      else if (a === "logout") { if (supa) supa.auth.signOut(); currentUser = null; render(); flash("Sesión cerrada"); }
     });
   }
-  function onSession(session) {
-    if (session && session.user) {
-      currentUser = session.user;
-      if (!booted) { booted = true; loadState(currentUser.id).then(function () { render(); }); }
-    } else {
-      currentUser = null;
-      if (!booted) renderAuth();
-    }
-  }
   function boot() {
+    ensureAuthWrap();
     initAuthListeners();
-    if (!supa) { render(); return; } // sin clave publishable configurada -> app local sin guardado
-    supa.auth.onAuthStateChange(function (_e, s) { onSession(s); });
-    supa.auth.getSession().then(function (r) { onSession(r.data.session); }, function () { renderAuth(); });
+    loadLocal();          // los datos guardados en este navegador se cargan siempre
+    render();
+    if (!supa) return;
+    supa.auth.getSession().then(function (r) { var s = r.data.session; if (s && s.user) { currentUser = s.user; loadCloud(currentUser.id).then(render); } }, function () {});
+    supa.auth.onAuthStateChange(function (_e, s) {
+      if (s && s.user) { currentUser = s.user; authView = false; loadCloud(currentUser.id).then(render); }
+      else { currentUser = null; render(); }
+    });
   }
 
   boot();
