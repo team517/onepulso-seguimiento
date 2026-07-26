@@ -93,15 +93,23 @@ async function importConversation(creds, contact) {
   const out = [], seen = new Set();
   try {
     const boxes = await client.list();
-    for (const box of boxes) {
-      if (box.flags && box.flags.has && box.flags.has("\\Noselect")) continue;
+    // Gmail: "All Mail/Todos" ya contiene todo → una sola carpeta (mucho más rápido).
+    const allMail = boxes.find(function (b) { return b.specialUse === "\\All" || /all mail|\/todos/i.test(b.path || ""); });
+    let targets;
+    if (allMail) targets = [allMail];
+    else targets = boxes.filter(function (b) {
+      if (b.flags && b.flags.has && b.flags.has("\\Noselect")) return false;
+      const p = (b.path || "").toLowerCase();
+      return p === "inbox" || b.specialUse === "\\Inbox" || b.specialUse === "\\Sent" || /(^|[\/.])sent|enviad/i.test(p);
+    });
+    for (const box of targets) {
       let lock;
       try { lock = await client.getMailboxLock(box.path); } catch (e) { continue; }
       try {
         let uids = [];
         try { uids = await client.search({ or: [{ from: contact }, { to: contact }] }, { uid: true }); } catch (e) { uids = []; }
         if (!uids || !uids.length) continue;
-        uids = uids.slice(-80); // últimos 80 por carpeta como tope de seguridad
+        uids = uids.slice(-60); // tope de seguridad por carpeta
         for await (const msg of client.fetch(uids, { uid: true, source: true }, { uid: true })) {
           try {
             const parsed = await simpleParser(msg.source);
