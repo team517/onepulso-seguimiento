@@ -1178,8 +1178,9 @@ window.OPSEG = (function () {
     importOpen:false, importQuery:"", searchResults:[], searching:false, searchBoxes:[],
     attachments:[], linkUrl:"",
     calMonth:(function(){ var d=new Date(); return {y:d.getFullYear(),m:d.getMonth()}; })(),
-    draftReply:"", replyTone:"normal",
-    draftFollow:"", schedInput:"",
+    draftReply:"", replyTone:"normal", aiHint:"",
+    draftFollow:"", schedInput:"", fuOpen:false, fuTone:"normal",
+    quoteOpen:{},
     toast:""
   };
   var drag={fu:null};
@@ -1290,9 +1291,9 @@ window.OPSEG = (function () {
     var body=state.draftFollow.trim(); if(!body){ flash("Escribe el cuerpo del follow-up"); return; }
     var at=state.schedInput?Date.parse(state.schedInput):0; if(!at||isNaN(at)){ flash("Elige fecha y hora"); return; }
     t.followups.push({ id:uid("f"), body_html:textToHtml(body), scheduled_at:at, status:"scheduled", origin:"manual" });
-    state.draftFollow="";
+    state.draftFollow=""; state.fuOpen=false;
     var d=new Date(at); state.calMonth={y:d.getFullYear(),m:d.getMonth()};
-    render(); flash("Follow-up programado · "+fmt(at)+" (míralo en el calendario)");
+    render(); flash("Follow-up programado · "+fmt(at));
   }
   function sendFollowNow(fid){
     allFollowups().forEach(function(o){ if(o.f.id===fid && o.f.status==="scheduled"){ var t=o.t,f=o.f; f.status="sent"; f.sent_at=Date.now(); t.messages.push({ id:uid("m"), direction:"outbound", body_html:f.body_html, body_text:stripHtml(f.body_html), date:Date.now(), message_id:uid("mid"), _followup:true }); }});
@@ -1304,7 +1305,7 @@ window.OPSEG = (function () {
     allFollowups().forEach(function(o){ if(o.f.id===fid){ var d=new Date(o.f.scheduled_at); var nd=new Date(newDayMs); nd.setHours(d.getHours(),d.getMinutes(),0,0); o.f.scheduled_at=nd.getTime(); moved={f:o.f,t:o.t}; }});
     render(); if(moved) flash("«"+firstName(moved.t.contact_name)+"» movido a "+fmt(moved.f.scheduled_at));
   }
-  function generateReply(t,tone){
+  function generateReply(t,tone,hint){
     var fn=firstName(t.contact_name)||"hola", lm=lastMsg(t);
     var inbound=lm&&lm.direction==="inbound"?(lm.body_text||"").toLowerCase():"";
     var contract=/contrato|propuesta|presupuesto|factura|condiciones|compras/.test(inbound);
@@ -1314,6 +1315,7 @@ window.OPSEG = (function () {
     if(tone==="directo"){ open="Hola "+fn+","; cta="¿Llamada de 15 min esta semana? Dime hueco y lo bloqueo."; }
     else if(tone==="cercano"){ open="¡Hola "+fn+"!"; cta="Si te apetece lo vemos en una llamada corta y relajada, cuando mejor te venga."; }
     else { open="Hola "+fn+","; cta="¿Te viene bien una llamada de 15 min esta semana para verlo en detalle?"; }
+    if(hint&&hint.trim()){ var h=hint.trim(); cta=h.charAt(0).toUpperCase()+h.slice(1); if(!/[.?!]$/.test(cta)) cta+="."; }
     return "<p>"+esc(open)+"</p><p>"+esc(mid)+"</p><p>"+esc(cta)+"</p><p>Un saludo,<br>Xavi</p>";
   }
 
@@ -1402,10 +1404,15 @@ window.OPSEG = (function () {
       case "next-month": state.calMonth=shiftMonth(1); render(); break;
       case "today-month": var d=new Date(); state.calMonth={y:d.getFullYear(),m:d.getMonth()}; render(); break;
       case "tone": state.replyTone=b.getAttribute("data-t"); renderDrawer(); break;
-      case "gen-reply": { var t=threadById(state.openThread); state.draftReply=htmlToText(generateReply(t,state.replyTone)); renderDrawer(); flash("IA · borrador generado ("+state.replyTone+")"); break; }
+      case "fu-tone": state.fuTone=b.getAttribute("data-t"); renderDrawer(); break;
+      case "gen-reply": { var t=threadById(state.openThread); state.draftReply=htmlToText(generateReply(t,state.replyTone,state.aiHint)); renderDrawer(); flash("IA · respuesta sugerida"); break; }
       case "send-reply": sendReply(); break;
-      case "gen-follow": { var t2=threadById(state.openThread); state.draftFollow=htmlToText(generateReply(t2,"normal")); renderDrawer(); flash("IA · borrador de follow-up generado"); break; }
+      case "gen-follow": { var t2=threadById(state.openThread); state.draftFollow=htmlToText(generateReply(t2,state.fuTone,"")); renderDrawer(); flash("IA · follow-up generado ("+state.fuTone+")"); break; }
       case "sched-follow": scheduleFollow(); break;
+      case "fu-open": state.fuOpen=true; if(!state.schedInput) state.schedInput=defaultSched(); renderDrawer(); break;
+      case "fu-close": if(e.target===b){ state.fuOpen=false; renderDrawer(); } break;
+      case "fu-quick": { var dd=parseInt(b.getAttribute("data-d"),10),hh=parseInt(b.getAttribute("data-h"),10); var qd=new Date(); qd.setDate(qd.getDate()+dd); qd.setHours(hh,0,0,0); state.schedInput=toLocalInput(qd.getTime()); renderDrawer(); break; }
+      case "toggle-quote": { var mid=b.getAttribute("data-id"); state.quoteOpen[mid]=!state.quoteOpen[mid]; renderDrawer(); break; }
       case "send-now": sendFollowNow(b.getAttribute("data-id")); break;
       case "cancel-follow": cancelFollow(b.getAttribute("data-id")); break;
       case "open-fu": { var fid=b.getAttribute("data-id"); var o=allFollowups().filter(function(x){return x.f.id===fid;})[0]; if(o){ state.openThread=o.t.id; state.draftReply=""; state.draftFollow=""; state.schedInput=defaultSched(); render(); } break; }
@@ -1497,6 +1504,14 @@ window.OPSEG = (function () {
     mountEl.innerHTML=toolbar+'<div class="seg-grid" style="display:grid;grid-template-columns:264px 1fr;gap:18px;align-items:start;">'+convPanel()+calendar()+'</div>';
   }
 
+  function splitQuoted(html){
+    html=html||"";
+    var markers=[/<blockquote/i,/<div[^>]*gmail_quote/i,/On [^<]{0,140}wrote:/i,/El [^<]{0,140}escrib[ií]/i,/-----\s*Original Message/i,/_{12,}/,/\n>/];
+    var idx=-1;
+    markers.forEach(function(re){ var m=re.exec(html); if(m && m.index>25 && (idx===-1||m.index<idx)) idx=m.index; });
+    if(idx===-1) return {main:html,quoted:""};
+    return {main:html.slice(0,idx),quoted:html.slice(idx)};
+  }
   // ---------- overlays ----------
   function renderDrawer(){
     var host=document.getElementById("opseg-drawer"); if(!host) return;
@@ -1510,7 +1525,11 @@ window.OPSEG = (function () {
         + (mm._followup?'<span style="font-size:9.5px;color:#5b3ad9;background:#ece7ff;padding:1px 6px;border-radius:99px;">follow-up</span>':'')
         + (mm.attachments&&mm.attachments.length?'<span style="font-size:10.5px;color:#8b8699;">📎 '+mm.attachments.length+'</span>':'')
         + '<span style="margin-left:auto;font-size:10.5px;color:#a8a3b8;">'+fmt(mm.date)+'</span></div>'
-        + '<div style="font-size:13.5px;font-weight:300;color:#3a3942;line-height:1.6;">'+(mm.body_html||("<p>"+esc(mm.body_text)+"</p>"))+'</div></div></div>';
+        + (function(){ var sp=splitQuoted(mm.body_html||("<p>"+esc(mm.body_text)+"</p>")); var qo=state.quoteOpen[mm.id];
+            return '<div style="font-size:13.5px;font-weight:300;color:#3a3942;line-height:1.6;word-break:break-word;">'+sp.main+'</div>'
+              + (sp.quoted?('<button data-sa="toggle-quote" data-id="'+mm.id+'" style="margin-top:6px;border:1px solid #e7e2f5;background:#f7f6fc;color:#8b8699;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;">'+(qo?"▲ Ocultar historial citado":"▼ Mostrar historial citado")+'</button>'+(qo?'<div style="font-size:12.5px;font-weight:300;color:#a8a3b8;line-height:1.55;margin-top:8px;border-left:2px solid #e3ddf7;padding-left:10px;word-break:break-word;">'+sp.quoted+'</div>':'')):'');
+          })()
+        + '</div></div>';
     }).join('<div style="height:12px;"></div>');
     var fus=t.followups.filter(function(f){return f.status==="scheduled";}).sort(function(a,b){return a.scheduled_at-b.scheduled_at;});
     var fuList=fus.length?'<div style="display:flex;flex-direction:column;gap:7px;">'+fus.map(function(f){
@@ -1521,8 +1540,24 @@ window.OPSEG = (function () {
         + '<button class="seg-ghost" data-sa="send-now" data-id="'+f.id+'" title="Enviar ahora" style="border:1px solid #e7e2f5;background:#fff;color:#12784a;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;">▶</button>'
         + '<button class="seg-ghost" data-sa="cancel-follow" data-id="'+f.id+'" title="Cancelar" style="border:1px solid #e7e2f5;background:#fff;color:#b0234c;border-radius:7px;padding:4px 8px;font-size:11px;cursor:pointer;">✕</button></div>';
     }).join("")+'</div>':'<div style="font-size:12px;font-weight:300;color:#a8a3b8;">Sin follow-ups. Programa uno abajo y aparecerá en el calendario.</div>';
-    var toneChips=[["normal","Normal"],["directo","Directo"],["cercano","Cercano"]].map(function(x){ var on=state.replyTone===x[0];
-      return '<button class="seg-ghost" data-sa="tone" data-t="'+x[0]+'" style="border:1px solid '+(on?"#7a5af8":"#e7e2f5")+';background:'+(on?"#f4f2ff":"#fff")+';color:'+(on?"#5b3ad9":"#57565f")+';border-radius:99px;padding:5px 11px;font-size:11.5px;cursor:pointer;">'+x[1]+'</button>'; }).join("");
+    var fuChips=[["Mañana 9:00",1,9],["+3 días 9:00",3,9],["+7 días 9:00",7,9],["+14 días 9:00",14,9],["+30 días 9:00",30,9]].map(function(c){ return '<button class="seg-ghost" data-sa="fu-quick" data-d="'+c[1]+'" data-h="'+c[2]+'" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:99px;padding:6px 13px;font-size:12px;cursor:pointer;">'+c[0]+'</button>'; }).join("");
+    var fuToneChips=[["cercano","🌱 Suave","#1a9d54"],["normal","🧠 Normal","#5b3ad9"],["directo","⚡ Directo","#b0234c"]].map(function(x){ var on=state.fuTone===x[0]; return '<button class="seg-ghost" data-sa="fu-tone" data-t="'+x[0]+'" style="border:1px solid '+(on?x[2]:"#e7e2f5")+';background:'+(on?x[2]+"14":"#fff")+';color:'+(on?x[2]:"#57565f")+';border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">'+x[1]+'</button>'; }).join("");
+    var fuModal = state.fuOpen
+      ? '<div data-sa="fu-close" style="position:fixed;inset:0;z-index:120;background:rgba(20,19,25,0.42);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;">'
+        + '<div style="width:100%;max-width:640px;background:#fff;border-radius:18px;box-shadow:0 30px 70px rgba(20,19,25,0.3);overflow:hidden;">'
+        + '<div style="padding:18px 22px;border-bottom:1px solid #f1eefa;display:flex;align-items:flex-start;gap:12px;"><div style="flex:1;"><div style="font-size:16px;font-weight:600;">Programar follow-up</div><div style="font-size:12.5px;font-weight:300;color:#8b8699;margin-top:2px;">Se enviará como Re: del hilo · si el prospect responde, se cancela.</div></div><button data-sa="fu-close" style="border:none;background:transparent;color:#8b8699;cursor:pointer;font-size:18px;">✕</button></div>'
+        + '<div style="padding:18px 22px;">'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">'+fuChips+'</div>'
+        + '<div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8b8699;margin-bottom:6px;">Fecha y hora</div>'
+        + '<input type="datetime-local" data-sm="schedInput" class="seg-in" value="'+esc(state.schedInput)+'" style="width:100%;border:1px solid #e7e2f5;border-radius:10px;padding:11px 13px;font-size:13.5px;outline:none;background:#f8f8fc;">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px;flex-wrap:wrap;"><span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8b8699;">Texto</span><span style="margin-left:auto;font-size:11.5px;color:#8b8699;">✦ Crear con IA · tono</span>'+fuToneChips+'</div>'
+        + '<textarea data-sm="draftFollow" class="seg-in" placeholder="Cuerpo del follow-up…" style="width:100%;min-height:120px;border:1px solid #e7e2f5;border-radius:10px;padding:12px;font-size:13.5px;font-weight:300;outline:none;line-height:1.55;background:#f8f8fc;">'+esc(state.draftFollow)+'</textarea>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap;">'
+        + '<button data-sa="fu-close" style="border:1px solid #e7e2f5;background:#fff;color:#57565f;border-radius:10px;padding:10px 16px;font-size:13.5px;cursor:pointer;">Cancelar</button>'
+        + '<button data-sa="gen-follow" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:10px;padding:10px 16px;font-size:13.5px;cursor:pointer;">✦ Crear con IA</button>'
+        + '<button data-sa="sched-follow" style="border:none;background:#141319;color:#fff;border-radius:10px;padding:10px 20px;font-size:13.5px;font-weight:600;cursor:pointer;">🚀 Programar follow-up</button></div>'
+        + '</div></div></div>'
+      : '';
     host.innerHTML=
       '<div data-sa="drawer-close" style="position:fixed;inset:0;z-index:90;background:rgba(20,19,25,0.42);display:flex;align-items:center;justify-content:center;padding:20px;">'
       + '<div style="width:100%;max-width:900px;height:88vh;background:#faf9fe;border-radius:18px;box-shadow:0 40px 90px rgba(20,19,25,0.4);display:flex;flex-direction:column;overflow:hidden;">'
@@ -1534,24 +1569,23 @@ window.OPSEG = (function () {
       + '<div class="seg-scroll" style="flex:1;min-height:0;padding:22px 26px;overflow:auto;">'
       + '<div style="max-width:820px;margin:0 auto;">'
       + '<div style="display:flex;flex-direction:column;">'+transcript+'</div>'
-      + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="font-size:13.5px;font-weight:500;">Escribir</span><div style="margin-left:auto;display:flex;gap:6px;">'+toneChips+'</div></div>'
-      + '<textarea data-sm="draftReply" class="seg-in" placeholder="Escribe tu mensaje o genéralo con IA…" style="width:100%;min-height:84px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftReply)+'</textarea>'
+      + '<div style="margin-top:22px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:16px;">'
+      + '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">Responder</div>'
+      + '<div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8b8699;margin-bottom:6px;">Pista para la IA (opcional)</div>'
+      + '<input data-sm="aiHint" class="seg-in" value="'+esc(state.aiHint)+'" placeholder="Ej: sé más directo y propón el martes 10:00" style="width:100%;border:1px solid #e7e2f5;border-radius:10px;padding:11px 13px;font-size:13px;outline:none;margin-bottom:12px;background:#f8f8fc;">'
+      + '<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">'
+      + '<button class="seg-ghost" data-sa="gen-reply" style="border:1px solid #e7e2f5;background:#fff;color:#141319;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;">✦ Sugerir respuesta IA</button>'
+      + '<button class="seg-ghost" data-sa="fu-open" style="border:1px solid #e7e2f5;background:#fff;color:#141319;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;">📅 Programar follow-up</button></div>'
+      + '<textarea data-sm="draftReply" class="seg-in" placeholder="Tu respuesta aquí…" style="width:100%;min-height:120px;border:1px solid #e7e2f5;border-radius:10px;padding:12px;font-size:13.5px;font-weight:300;outline:none;line-height:1.55;background:#f8f8fc;">'+esc(state.draftReply)+'</textarea>'
       + ((state.attachments&&state.attachments.length)?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+state.attachments.map(function(f,i){return '<span style="display:inline-flex;align-items:center;gap:6px;background:#f4f2ff;border:1px solid #e3ddf7;border-radius:8px;padding:4px 9px;font-size:11.5px;color:#5b3ad9;">📎 '+esc(f.name)+' <button data-sa="attach-remove" data-i="'+i+'" style="border:none;background:transparent;color:#b0234c;cursor:pointer;font-size:12px;padding:0;">✕</button></span>';}).join("")+'</div>':'')
       + '<div style="display:flex;gap:8px;margin-top:8px;"><input data-sm="linkUrl" class="seg-in" value="'+esc(state.linkUrl)+'" placeholder="https://… (link a insertar)" style="flex:1;border:1px solid #e7e2f5;border-radius:9px;padding:8px 11px;font-size:12.5px;outline:none;"><button class="seg-ghost" data-sa="link-add" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">Insertar link</button></div>'
-      + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;">'
-      + '<label style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">📎 Adjuntar<input id="opseg-attach" type="file" multiple style="display:none;"></label>'
-      + '<button class="seg-ghost" data-sa="gen-reply" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
-      + '<button class="seg-primary" data-sa="send-reply" '+(state.sending?"disabled":"")+' style="margin-left:auto;border:none;background:'+(state.sending?"#b9a7fb":"#7a5af8")+';color:#fff;border-radius:9px;padding:8px 16px;font-size:12.5px;cursor:'+(state.sending?"default":"pointer")+';">'+(state.sending?"Enviando…":"Enviar")+'</button></div></div>'
-      + '<div style="margin-top:14px;background:#fff;border:1px solid #edeaf7;border-radius:14px;padding:14px;">'
-      + '<div style="font-size:13.5px;font-weight:500;margin-bottom:10px;">Programar follow-up</div>'
-      + '<textarea data-sm="draftFollow" class="seg-in" placeholder="Cuerpo del follow-up…" style="width:100%;min-height:64px;border:1px solid #e7e2f5;border-radius:10px;padding:11px;font-size:13px;font-weight:300;outline:none;line-height:1.55;">'+esc(state.draftFollow)+'</textarea>'
-      + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">'
-      + '<input type="datetime-local" data-sm="schedInput" class="seg-in" value="'+esc(state.schedInput)+'" style="border:1px solid #e7e2f5;border-radius:9px;padding:8px 10px;font-size:12.5px;outline:none;flex:1;min-width:170px;">'
-      + '<button class="seg-ghost" data-sa="gen-follow" style="border:1px solid #e0d9f7;background:#f4f2ff;color:#5b3ad9;border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;">✦ IA</button>'
-      + '<button class="seg-primary" data-sa="sched-follow" style="border:none;background:#7a5af8;color:#fff;border-radius:9px;padding:8px 15px;font-size:12.5px;cursor:pointer;">Programar</button></div>'
-      + '<div style="margin-top:14px;border-top:1px solid #f4f2fb;padding-top:12px;"><div style="font-size:11.5px;font-weight:600;color:#8b8699;margin-bottom:8px;">Programados</div>'+fuList+'</div></div>'
-      + '</div></div></div></div>';
+      + '<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">'
+      + '<label style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:10px;padding:9px 13px;font-size:12.5px;cursor:pointer;">📎 Adjuntar<input id="opseg-attach" type="file" multiple style="display:none;"></label>'
+      + '<button class="seg-primary" data-sa="send-reply" '+(state.sending?"disabled":"")+' style="margin-left:auto;border:none;background:'+(state.sending?"#555":"#141319")+';color:#fff;border-radius:10px;padding:11px 22px;font-size:14px;font-weight:600;cursor:'+(state.sending?"default":"pointer")+';">'+(state.sending?"Enviando…":"Enviar ahora")+'</button></div>'
+      + (fus.length?'<div style="margin-top:14px;border-top:1px solid #f4f2fb;padding-top:12px;"><div style="font-size:11.5px;font-weight:600;color:#8b8699;margin-bottom:8px;">Follow-ups programados</div>'+fuList+'</div>':'')
+      + '</div>'
+      + '</div></div></div></div>'
+      + fuModal;
   }
   function importSuggestions(){
     if(state.importing) return '<div style="padding:22px 14px;font-size:13px;font-weight:300;color:#5b3ad9;text-align:center;">Buscando en tu buzón por IMAP…</div>';
