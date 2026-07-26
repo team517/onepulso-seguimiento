@@ -1201,7 +1201,8 @@ window.OPSEG = (function () {
       return reconnect().then(function(ok){ if(!ok) return r; o.headers.Authorization="Bearer "+emailToken; return fetch(u,o); });
     });
   }
-  function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); localStorage.removeItem("op_email_conn"); }catch(e){} state.account=null; render(); flash("No se pudo reconectar · vuelve a introducir tus datos"); }
+  function handle401(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); }catch(e){} render(); if(!getStoredConn()){ state.account=null; render(); flash("Conecta tu correo"); } else { flash("Reconectando al correo… (si persiste, revisa tu contraseña o pulsa Cambiar cuenta)"); } }
+  function disconnectEmail(){ emailToken=""; try{ localStorage.removeItem("op_email_token"); localStorage.removeItem("op_email_addr"); localStorage.removeItem("op_email_conn"); }catch(e){} state.account=null; render(); flash("Cuenta desconectada"); }
   var LS_SEG="onepulso_seg_v1", segTimer=null;
   function saveSeg(){ clearTimeout(segTimer); segTimer=setTimeout(function(){ try{ localStorage.setItem(LS_SEG, JSON.stringify({ threads: state.threads, inboxThreads: state.inboxThreads })); }catch(e){} }, 500); }
   function loadSeg(){ try{ var raw=localStorage.getItem(LS_SEG); if(raw){ var d=JSON.parse(raw); if(d&&Array.isArray(d.threads)) state.threads=d.threads; if(d&&Array.isArray(d.inboxThreads)) state.inboxThreads=d.inboxThreads; } }catch(e){} }
@@ -1394,6 +1395,7 @@ window.OPSEG = (function () {
       case "import-open": state.importOpen=true; state.importQuery=""; render(); setTimeout(function(){ var i=document.getElementById("opseg-import-input"); if(i) i.focus(); },30); break;
       case "import-close": if(e.target===b){ state.importOpen=false; render(); } break;
       case "import-do": importConversation(b.getAttribute("data-email")||state.importQuery); break;
+      case "disconnect": disconnectEmail(); break;
       case "sync-inbox": syncThreads(); break;
       case "open-inbox": importConversation(b.getAttribute("data-email")); break;
       case "search-do": searchDo(); break;
@@ -1499,6 +1501,7 @@ window.OPSEG = (function () {
       + '<div style="margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">'
       + '<span style="font-size:12.5px;font-weight:300;color:#8b8699;display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:2px;background:#7a5af8;"></span>'+activeFus().length+' follow-ups programados</span>'
       + '<span style="font-size:12.5px;font-weight:300;color:#12784a;display:inline-flex;align-items:center;gap:6px;background:#e4f7ed;padding:6px 11px;border-radius:99px;">✓ '+esc(state.account.email)+'</span>'
+      + '<button data-sa="disconnect" title="Cambiar de cuenta de correo" style="border:1px solid #e7e2f5;background:#fff;color:#8b8699;border-radius:99px;padding:6px 12px;font-size:11.5px;cursor:pointer;">Cambiar cuenta</button>'
       + '</div></div>'
       + '<div style="font-size:12.5px;font-weight:300;color:#8b8699;margin-bottom:12px;">Arrastra un follow-up a otro día para reprogramarlo · pulsa para abrir la conversación.</div>';
     mountEl.innerHTML=toolbar+'<div class="seg-grid" style="display:grid;grid-template-columns:264px 1fr;gap:18px;align-items:start;">'+convPanel()+calendar()+'</div>';
@@ -1634,7 +1637,7 @@ window.OPSEG = (function () {
   function render(){ attach(); ensureContainers(); renderInline(); renderDrawer(); renderModal(); renderToast(); saveSeg(); }
 
   return {
-    mount:function(el){ mountEl=el; active=true; render(); },
+    mount:function(el){ mountEl=el; active=true; render(); if(!state._reco && getStoredConn()){ state._reco=true; reconnect().then(function(ok){ if(ok) render(); }); } },
     hide:function(){ active=false; var d=document.getElementById("opseg-drawer"); if(d) d.innerHTML=""; var mm=document.getElementById("opseg-modal"); if(mm) mm.innerHTML=""; var tt=document.getElementById("opseg-toast"); if(tt) tt.innerHTML=""; }
   };
 })();
