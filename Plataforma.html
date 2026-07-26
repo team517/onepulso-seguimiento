@@ -1306,8 +1306,7 @@ window.OPSEG = (function () {
         emailToken=res.j.token;
         try{ localStorage.setItem("op_email_token",emailToken); localStorage.setItem("op_email_addr",res.j.email); }catch(e){}
         state.account={ email:res.j.email }; state.cPass="";
-        render(); flash("Correo conectado · "+res.j.email);
-        syncThreads();
+        render(); flash("Correo conectado · "+res.j.email+" — importa las conversaciones que quieras");
       }, function(){ state.connecting=false; state.connError="Error de red — ¿el servidor está activo?"; render(); });
   }
   var PRESETS={ ionos:["imap.ionos.es","993","smtp.ionos.es","465"], gmail:["imap.gmail.com","993","smtp.gmail.com","465"], outlook:["outlook.office365.com","993","smtp.office365.com","587"] };
@@ -1400,28 +1399,25 @@ window.OPSEG = (function () {
       + '</div></div>';
   }
   function convRows(){
-    if(state.syncing) return '<div style="padding:26px 14px;font-size:13px;color:#5b3ad9;text-align:center;">Leyendo tu buzón por IMAP…</div>';
     var q=(state.inboxQuery||"").trim().toLowerCase();
-    var list=state.inboxThreads.filter(function(t){ if(!q) return true; return ((t.contact_name||"")+" "+(t.contact_email||"")+" "+(t.subject||"")).toLowerCase().indexOf(q)!==-1; });
-    if(!list.length) return '<div style="padding:16px 12px;font-size:12.5px;font-weight:300;color:#a8a3b8;text-align:center;">'+(state.inboxThreads.length?"Sin resultados":"Pulsa «Sincronizar buzón» para traer tus conversaciones.")+'</div>';
+    var list=state.threads.filter(function(t){ if(!q) return true; return ((t.contact_name||"")+" "+(t.email||"")+" "+(t.subject||"")).toLowerCase().indexOf(q)!==-1; });
+    if(!list.length) return '<div style="padding:16px 12px;font-size:12.5px;font-weight:300;color:#a8a3b8;text-align:center;line-height:1.5;">'+(state.threads.length?"Sin resultados.":"Aún no has importado ninguna conversación.<br>Pulsa «＋ Importar conversación» y escribe un email.")+'</div>';
     return list.map(function(t){
-      var opened=state.threads.filter(function(x){return x.email&&x.email.toLowerCase()===(t.contact_email||"").toLowerCase();})[0];
-      var sel=opened&&state.openThread===opened.id;
-      return '<button class="seg-conv" data-sa="open-inbox" data-email="'+esc(t.contact_email)+'" data-name="'+esc(t.contact_name||"")+'" style="text-align:left;width:100%;border:none;background:'+(sel?"#f4f2ff":"transparent")+';border-radius:11px;padding:10px 11px;cursor:pointer;display:flex;gap:11px;align-items:flex-start;">'
-        + '<span style="width:36px;height:36px;flex:none;border-radius:10px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">'+esc(initials(t.contact_name||t.contact_email))+'</span>'
+      var open=state.openThread===t.id, lm=lastMsg(t);
+      return '<button class="seg-conv" data-sa="open" data-id="'+t.id+'" style="text-align:left;width:100%;border:none;background:'+(open?"#f4f2ff":"transparent")+';border-radius:11px;padding:10px 11px;cursor:pointer;display:flex;gap:11px;align-items:flex-start;">'
+        + '<span style="width:36px;height:36px;flex:none;border-radius:10px;background:#ece7ff;color:#5b3ad9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">'+esc(initials(t.contact_name))+'</span>'
         + '<span style="min-width:0;flex:1;line-height:1.35;">'
-        + '<span style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13.5px;font-weight:600;color:#141319;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">'+esc(t.contact_name||t.contact_email)+'</span><span style="font-size:11px;color:#a8a3b8;white-space:nowrap;">'+(t.last_date?rel(t.last_date):"")+'</span></span>'
-        + '<span style="display:block;font-size:12px;font-weight:400;color:#57565f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.subject||"(sin asunto)")+'</span>'
-        + '<span style="display:inline-flex;margin-top:5px;gap:6px;align-items:center;">'+(t.last_dir==="inbound"?'<span style="font-size:10px;color:#12784a;background:#e4f7ed;padding:1px 7px;border-radius:99px;">te respondió</span>':'')+'<span style="font-size:10px;color:#8b8699;background:#f1f0f5;padding:1px 7px;border-radius:99px;">'+(t.count||1)+' msg</span></span>'
+        + '<span style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:13.5px;font-weight:600;color:#141319;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">'+esc(t.contact_name)+'</span><span style="font-size:11px;color:#a8a3b8;white-space:nowrap;">'+(lm?rel(lm.date):"")+'</span></span>'
+        + '<span style="display:block;font-size:12px;font-weight:400;color:#57565f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.email)+'</span>'
+        + '<span style="display:inline-flex;margin-top:5px;gap:6px;align-items:center;">'+((lm&&lm.direction==="inbound")?'<span style="font-size:10px;color:#12784a;background:#e4f7ed;padding:1px 7px;border-radius:99px;">te respondió</span>':'')+'<span style="font-size:10px;color:#8b8699;background:#f1f0f5;padding:1px 7px;border-radius:99px;">'+t.messages.length+' msg</span></span>'
         + '</span></button>';
     }).join("");
   }
   function convPanel(){
     return '<div style="background:#fff;border:1px solid #edeaf7;border-radius:18px;box-shadow:0 8px 22px rgba(122,90,248,0.05);overflow:hidden;display:flex;flex-direction:column;max-height:660px;">'
       + '<div style="padding:12px;border-bottom:1px solid #f1eefa;display:flex;flex-direction:column;gap:8px;">'
-      + '<div style="display:flex;gap:8px;"><button class="seg-primary" data-sa="sync-inbox" '+(state.syncing?"disabled":"")+' style="flex:1;border:none;background:'+(state.syncing?"#b9a7fb":"#7a5af8")+';color:#fff;border-radius:10px;padding:10px;font-size:12.5px;cursor:pointer;">'+(state.syncing?"Sincronizando…":"↻ Sincronizar buzón")+'</button>'
-      + '<button class="seg-ghost" data-sa="import-open" title="Importar por email" style="border:1px solid #e7e2f5;background:#fff;color:#5b3ad9;border-radius:10px;padding:10px 13px;font-size:14px;cursor:pointer;">＋</button></div>'
-      + '<input data-sm="inboxQuery" value="'+esc(state.inboxQuery)+'" placeholder="Buscar por nombre, email o asunto…" class="seg-in" style="width:100%;border:1px solid #e7e2f5;border-radius:10px;padding:9px 12px;font-size:12.5px;outline:none;"></div>'
+      + '<button class="seg-primary" data-sa="import-open" style="width:100%;border:none;background:#7a5af8;color:#fff;border-radius:10px;padding:11px;font-size:13px;cursor:pointer;box-shadow:0 8px 20px rgba(122,90,248,0.26);">＋ Importar conversación</button>'
+      + (state.threads.length?'<input data-sm="inboxQuery" value="'+esc(state.inboxQuery)+'" placeholder="Buscar en tus conversaciones…" class="seg-in" style="width:100%;border:1px solid #e7e2f5;border-radius:10px;padding:9px 12px;font-size:12.5px;outline:none;">':'')+'</div>'
       + '<div id="opseg-inbox-list" class="seg-scroll" style="flex:1;min-height:0;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:2px;">'+convRows()+'</div></div>';
   }
   function evChip(o){
