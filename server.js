@@ -133,6 +133,74 @@ async function importConversation(creds, contact) {
   return out;
 }
 
+function normSubj(s) { return String(s || "").replace(/^(\s*(re|fwd|fw|rv)\s*:\s*)+/i, "").trim(); }
+function buildCriteria(q) {
+  q = String(q || "").trim();
+  var ops = {};
+  var free = q.replace(/\b(from|to|subject|after|before):(\S+)/gi, function (_, k, v) { ops[k.toLowerCase()] = v; return ""; }).trim();
+  var crit = {};
+  if (ops.from) crit.from = ops.from;
+  if (ops.to) crit.to = ops.to;
+  if (ops.subject) crit.subject = ops.subject;
+  if (ops.after) { var d = new Date(String(ops.after).replace(/\//g, "-")); if (!isNaN(d)) crit.since = d; }
+  if (ops.before) { var d2 = new Date(String(ops.before).replace(/\//g, "-")); if (!isNaN(d2)) crit.before = d2; }
+  if (free) crit.or = [{ from: free }, { to: free }, { subject: free }];
+  return Object.keys(crit).length ? crit : null;
+}
+// Búsqueda rápida: IMAP SEARCH (servidor) + solo cabeceras, agrupado por conversación (asunto)
+async function searchEmails(creds, query) {
+  const criteria = buildCriteria(query);
+  if (!criteria) return { boxes: [], results: [] };
+  const me = String(creds.email || creds.imap.user).toLowerCase();
+  const client = new ImapFlow({
+    host: creds.imap.host, port: Number(creds.imap.port), secure: creds.imap.secure !== false,
+    auth: { user: creds.imap.user, pass: creds.imap.pass }, logger: false, socketTimeout: 30000
+  });
+  await client.connect();
+  const map = {}, boxesUsed = [];
+  try {
+    const boxes = await client.list();
+    const targets = boxes.filter(function (b) {
+      if (b.flags && b.flags.has && b.flags.has("\\Noselect")) return false;
+      const p = (b.path || "").toLowerCase();
+      return p === "inbox" || b.specialUse === "\\Inbox" || b.specialUse === "\\Sent" || /(^|[\/.])sent|enviad/i.test(p) || b.specialUse === "\\All" || /all mail|todos/i.test(p);
+    });
+    for (const box of targets) {
+      let lock;
+      try { lock = await client.getMailboxLock(box.path); } catch (e) { continue; }
+      try {
+        boxesUsed.push(box.path);
+        let uids = [];
+        try { uids = await client.search(criteria, { uid: true }); } catch (e) { uids = []; }
+        if (!uids || !uids.length) continue;
+        uids = uids.slice(-80);
+        for await (const m of client.fetch(uids, { uid: true, envelope: true }, { uid: true })) {
+          const env = m.envelope; if (!env) continue;
+          const fromAddr = (env.from && env.from[0] && env.from[0].address || "").toLowerCase();
+          const parts = [];
+          if (env.from) env.from.forEach(function (a) { if (a.address) parts.push(a.address.toLowerCase()); });
+          (env.to || []).forEach(function (a) { if (a.address) parts.push(a.address.toLowerCase()); });
+          (env.cc || []).forEach(function (a) { if (a.address) parts.push(a.address.toLowerCase()); });
+          const key = normSubj(env.subject).toLowerCase() || fromAddr || (box.path + ":" + m.uid);
+          const date = env.date ? new Date(env.date).getTime() : Date.now();
+          const cur = map[key] || { subject: env.subject || "(sin asunto)", participants: {}, count: 0, last_date: 0 };
+          cur.count++;
+          parts.forEach(function (a) { if (a) cur.participants[a] = true; });
+          if (date >= cur.last_date) { cur.last_date = date; if (env.subject) cur.subject = env.subject; }
+          map[key] = cur;
+        }
+      } finally { try { lock.release(); } catch (e) {} }
+    }
+  } finally { try { await client.logout(); } catch (e) {} }
+  const results = Object.keys(map).map(function (k) {
+    const g = map[k];
+    const participants = Object.keys(g.participants);
+    const contact = participants.filter(function (a) { return a !== me; })[0] || participants[0] || "";
+    return { subject: g.subject, participants: participants, count: g.count, last_date: g.last_date, contact_email: contact };
+  }).sort(function (a, b) { return b.last_date - a.last_date; }).slice(0, 40);
+  return { boxes: boxesUsed, results: results };
+}
+
 // ---- SMTP: enviar respuesta con adjuntos ----
 async function sendMail(creds, opts, files) {
   const port = Number(creds.smtp.port);
@@ -189,6 +257,17 @@ app.post("/api/email/threads", auth, async function (req, res) {
     res.json({ threads: threads });
   } catch (e) {
     res.status(500).json({ error: "threads_fallido", detail: String(e && e.message || e) });
+  }
+});
+
+app.post("/api/email/search", auth, async function (req, res) {
+  try {
+    const q = String((req.body && req.body.query) || "").trim();
+    if (!q) return res.status(400).json({ error: "falta_query" });
+    const out = await searchEmails(req.creds, q);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: "busqueda_fallida", detail: String(e && e.message || e) });
   }
 });
 
